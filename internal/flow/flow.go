@@ -231,6 +231,9 @@ func validateAction(action string, value any) error {
 		}
 	case "expect":
 		m := value.(map[string]any)
+		if filter := networkCondition(m); filter != nil {
+			return validateNativeFields("network", filter, false)
+		}
 		for _, k := range []string{"selector", "js", "frame"} {
 			if v, ok := m[k]; ok {
 				if err := require(v, k); err != nil {

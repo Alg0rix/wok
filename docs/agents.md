@@ -104,7 +104,10 @@ Read `screen.width` as well as `innerWidth` when diagnosing that distinction.
 Use [YAML/JSON flows](flows.md) for many actions in one invocation and optional
 E2E assertions. Flows support `if`/`then`/`else`, `repeat` (`times`, `while`,
 `until`), `each` loops, and `route`/`unroute`/`request` steps for network mocks,
-so branching logic need not move into `eval`. `wok run FILE` emits a report;
+so branching logic need not move into `eval`. Filter requests with
+`network: {method, url, body: true}`, wait for them with
+`expect: {network: {url, count}}`, and pass saved values into JavaScript as JSON
+literals with `${name|json}`. `wok run FILE` emits a report;
 failure screenshots use an artifact directory. Store stable selectors in flows,
 rather than refs from previous runs.
 
@@ -280,7 +283,7 @@ profile running unless the task requests its closure.
 | `cookie-list` / `cookie-get <name>` / `cookie-set <name> <val>` / `cookie-delete <name>` / `cookie-clear` | Inspect or mutate browser cookies |
 | `localstorage-list\|get\|set\|delete\|clear` | Inspect or mutate `localStorage` on the active origin |
 | `sessionstorage-list\|get\|set\|delete\|clear` | Inspect or mutate `sessionStorage` on the active origin |
-| `requests` / `network` | List recorded network requests with 1-based `index` |
+| `requests` / `network [--method M] [--url GLOB] [--type T] [--body]` | List recorded network requests with 1-based `index`; filters keep the index, `--body` adds `requestBody`/`requestJson` |
 | `request <index>` / `request-headers <index>` / `request-body <index>` / `response-headers <index>` / `response-body <index>` | Inspect recorded request/response headers and bodies |
 | `route <pattern> [--status N] [--body T\|--body-file F] [--content-type C] [--header K:V] [--times N] [--abort]` | Mock or block matching network requests. Globs match the full URL (`**/api/**`); newest route wins; `--times` expires a route after N hits |
 | `route-list` / `unroute [pattern]` | List or remove network routes |

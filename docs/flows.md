@@ -80,7 +80,7 @@ Each step contains exactly one action, with optional `name`, `timeout`, and
 | Close tab | `tab: {close: "${details.targetId}"}` |
 | Mock a request | `route: {pattern: "**/api/**", status: 200, body: "{}"}` |
 | Remove routes | `unroute: "**/api/**"` or `unroute: true` (all) |
-| List requests | `network: true` |
+| List requests | `network: true`, or filtered: `network: {method: POST, url: "**/api/chat/**", type: Fetch, body: true}` |
 | Inspect a request | `request: 3` (index from `network`) |
 | Branch | `if: {selector: "#banner"}` with `then:` / `else:` steps |
 | Loop | `repeat: {times: 3, steps: [...]}`, `repeat: {until: {...}, steps: [...]}` |
@@ -168,9 +168,25 @@ routes, until they expire or `unroute` removes them; the CLI `route-list` shows
 each route's `hits`. Route bodies are sent whole; when a test needs streaming
 timing or responses computed from the request, run your own test server and let
 the flow drive the browser against it. `network: true` lists requests with an
-`index`; `request: INDEX` returns that request's headers and bodies, for example
-to check a POST payload. Saved arrays such as `network` results are available
-as `${net.0.url}`, `${net.length}`, or as `each` items.
+`index`; `request: INDEX` returns that request's headers and bodies. A filter
+object narrows the list by `method`, `url` (route glob), and resource `type`,
+keeping each `index`; `body: true` adds each `requestBody` and, for JSON bodies,
+the parsed `requestJson`. To wait for and check POST payloads:
+
+```yaml
+steps:
+  - click: .chat-send
+  - expect: {network: {method: POST, url: "**/chat/stream", count: 2}}
+  - network: {method: POST, url: "**/chat/stream", body: true}
+    save: sent
+  - expect: {js: '${sent.1.requestJson|json}.message === "second"'}
+```
+
+A `network` condition in `expect`, `if`, or `repeat` holds when at least one
+recorded request matches its `method`, `url`, and `type`, or exactly `count`
+requests when `count` is set; it cannot be combined with page conditions.
+Saved arrays such as `network` results are available as `${net.0.url}`,
+`${net.length}`, or as `each` items.
 
 Use stable CSS selectors for stored flows. Snapshot refs change and belong to
 a specific document/target; do not hardcode refs from an earlier run. Actions
@@ -203,9 +219,12 @@ steps:
 ```
 
 Captured object fields are available through dotted names; captured arrays
-expose `${name.0}`, `${name.length}`, and the JSON text as `${name}`. Captured values are
-text substitution; for JavaScript values requiring escaping, prefer an explicit
-assertion such as `expect.text` rather than interpolating values into code.
+expose `${name.0}`, `${name.length}`, and the JSON text as `${name}`. Values are
+inserted as plain text. Inside JavaScript (`eval`, `js`), use `${name|json}`
+instead: it inserts a JSON literal, so strings arrive quoted and escaped, and
+objects, arrays, numbers, and booleans keep their type, for example
+`${sent.0.requestBody|json}` or `${user|json}.name`. Variables from `--var` and
+the environment are strings under `|json`.
 
 ## Assertions
 
@@ -231,7 +250,8 @@ Text and value assertions compare exact strings; `contains` checks a substring.
 A selector alone checks existence. `count: 0` checks absence. `visible` checks
 layout/style visibility, not occlusion by another element. Text/value/count/
 visibility predicates require a selector. Conditions in one `expect` combine
-with AND. `js` must return a boolean; invalid JavaScript/selectors fail directly.
+with AND. `network: {method, url, type, count}` waits for recorded requests (see
+[Network mocking](#network-mocking)). `js` must return a boolean; invalid JavaScript/selectors fail directly.
 Selectors and assertions address the main document unless they reach into an
 iframe. Chain the iframe and the element with ` >> `, as in element actions, or
 set `frame` to run every condition, including `url` and `js`, inside the frame:

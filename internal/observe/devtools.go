@@ -65,6 +65,17 @@ func compileRoute(r *Route) error {
 	return err
 }
 
+// GlobMatcher returns a matcher using route glob semantics: ** matches any
+// text, * matches text without "/", and a pattern without * matches as a
+// substring.
+func GlobMatcher(pattern string) (func(string) bool, error) {
+	r := &Route{Pattern: pattern}
+	if err := compileRoute(r); err != nil {
+		return nil, err
+	}
+	return r.re.MatchString, nil
+}
+
 // RouteHint explains why a glob pattern cannot match an http(s) URL, or
 // returns "" when it can. Globs match the whole URL including the scheme, so
 // "*/api/*" never matches "http://host/api/x"; "**/api/**" does.

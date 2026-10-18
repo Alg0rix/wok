@@ -119,7 +119,7 @@ wok close-all
 
 | Command | Description |
 |---|---|
-| `wok requests` / `wok network` | List recorded network requests for the active tab with 1-based `index`. |
+| `wok requests` / `wok network [--method M] [--url GLOB] [--type T] [--body]` | List recorded network requests for the active tab with 1-based `index`. Filters keep each `index`; `--body` adds `requestBody` and parsed `requestJson`. |
 | `wok request <index>` | Inspect full request/response metadata, headers, and bodies for request `<index>`. |
 | `wok request-headers <index>` | Return request headers for request `<index>`. |
 | `wok request-body <index>` | Return request POST body for request `<index>`. |

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/alg0rix/wok/internal/observe"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -67,7 +68,16 @@ func objectWithTypes(n *yaml.Node, schema map[string]string, required ...string)
 }
 func parseNative(action string, n *yaml.Node) (any, error) {
 	switch action {
-	case "console", "errors", "network", "downloads", "dialogs":
+	case "network":
+		if n.Kind == yaml.MappingNode {
+			return objectWithTypes(n, networkFilterTypes)
+		}
+		value, err := boolean(n)
+		if err != nil || !value {
+			return nil, errors.New("network must be true or a filter object (method, url, type, body)")
+		}
+		return true, nil
+	case "console", "errors", "downloads", "dialogs":
 		value, err := boolean(n)
 		if err != nil || !value {
 			return nil, fmt.Errorf("%s must be true", action)
@@ -284,6 +294,17 @@ func validateNativeFields(action string, m map[string]any, complete bool) error 
 		return nil
 	}
 	switch action {
+	case "network":
+		for _, key := range []string{"method", "url", "type"} {
+			if err := nonempty(key); err != nil {
+				return err
+			}
+		}
+		if u, ok := m["url"].(string); ok {
+			if hint := observe.RouteHint(u); hint != "" {
+				return errors.New(hint)
+			}
+		}
 	case "find":
 		if err := enum("kind", "role", "text", "css"); err != nil {
 			return err
@@ -395,7 +416,10 @@ func nativeArgs(action string, value any) ([]string, bool) {
 	if !isNative(action) {
 		return nil, false
 	}
-	if action == "console" || action == "errors" || action == "network" || action == "downloads" || action == "dialogs" {
+	if action == "network" {
+		return append([]string{"network"}, networkFilterArgs(value)...), true
+	}
+	if action == "console" || action == "errors" || action == "downloads" || action == "dialogs" {
 		return []string{action}, true
 	}
 	if action == "wait" {

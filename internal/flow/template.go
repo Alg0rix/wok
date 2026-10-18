@@ -20,6 +20,15 @@ type template []part
 
 var variableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
 
+// jsonSuffix marks ${NAME|json}, which inserts the value as a JSON literal.
+// Captured values keep their JSON form under NAME|json.
+const jsonSuffix = "|json"
+
+// under reports whether key is name or one of its fields or forms.
+func under(key, name string) bool {
+	return key == name || strings.HasPrefix(key, name+".") || strings.HasPrefix(key, name+jsonSuffix)
+}
+
 type variables struct {
 	values  map[string]string
 	secrets map[string]bool
@@ -64,13 +73,20 @@ func (v *variables) compile(s string, saved map[string]bool) (template, error) {
 		}
 		out = append(out, part{text: before})
 		name, rest, closed := strings.Cut(after, "}")
+		name, asJSON := strings.CutSuffix(name, jsonSuffix)
 		if !closed || !variableName.MatchString(name) {
 			return nil, errors.New("invalid ${NAME} variable reference (write $${...} for a literal ${...})")
 		}
 		prefix, _, _ := strings.Cut(name, ".")
 		if saved[prefix] {
+			if asJSON {
+				name += jsonSuffix
+			}
 			out = append(out, part{text: name, variable: true})
 		} else if value, ok := v.lookup(name); ok {
+			if asJSON {
+				value = jsQuote(value)
+			}
 			out = append(out, part{text: value})
 		} else {
 			return nil, fmt.Errorf("missing variable %s (write $${%s} for a literal ${%s})", name, name, name)
@@ -117,8 +133,17 @@ func (v *variables) resolve(value any) (any, error) {
 				continue
 			}
 			val, ok := v.values[p.text]
+			if name, asJSON := strings.CutSuffix(p.text, jsonSuffix); asJSON && !ok {
+				// Values set without a JSON form are text.
+				if val, ok = v.values[name]; ok {
+					val = jsQuote(val)
+				}
+			}
 			if !ok {
-				return nil, fmt.Errorf("saved variable %s has no scalar value", p.text)
+				if name, asJSON := strings.CutSuffix(p.text, jsonSuffix); asJSON {
+					return nil, fmt.Errorf("saved variable %s has no value", name)
+				}
+				return nil, fmt.Errorf("saved variable %s has no scalar value (use ${%s|json} for its JSON form)", p.text, p.text)
 			}
 			out.WriteString(val)
 		}
@@ -178,7 +203,7 @@ func (v *variables) capture(name string, raw json.RawMessage) error {
 		return fmt.Errorf("cannot save result: %w", err)
 	}
 	for k := range v.values {
-		if k == name || strings.HasPrefix(k, name+".") {
+		if under(k, name) {
 			delete(v.values, k)
 		}
 	}
@@ -189,7 +214,7 @@ func (v *variables) capture(name string, raw json.RawMessage) error {
 // not treated as secrets for error redaction.
 func (v *variables) setLocal(name string, value any) {
 	for k := range v.values {
-		if k == name || strings.HasPrefix(k, name+".") {
+		if under(k, name) {
 			delete(v.values, k)
 		}
 	}
@@ -200,7 +225,7 @@ func (v *variables) setLocal(name string, value any) {
 func (v *variables) snapshot(name string) map[string]string {
 	out := map[string]string{}
 	for k, val := range v.values {
-		if k == name || strings.HasPrefix(k, name+".") {
+		if under(k, name) {
 			out[k] = val
 		}
 	}
@@ -210,7 +235,7 @@ func (v *variables) snapshot(name string) map[string]string {
 // restore replaces the values under name and name.* with a snapshot.
 func (v *variables) restore(name string, saved map[string]string) {
 	for k := range v.values {
-		if k == name || strings.HasPrefix(k, name+".") {
+		if under(k, name) {
 			delete(v.values, k)
 		}
 	}
@@ -222,6 +247,9 @@ func (v *variables) restore(name string, saved map[string]string) {
 // flatten stores scalars under name, object fields under name.FIELD, and
 // arrays as JSON text under name plus name.N items and name.length.
 func (v *variables) flatten(name string, value any, secret bool) error {
+	if data, err := json.Marshal(value); err == nil {
+		v.values[name+jsonSuffix] = string(data)
+	}
 	switch x := value.(type) {
 	case map[string]any:
 		for k, item := range x {
@@ -237,6 +265,7 @@ func (v *variables) flatten(name string, value any, secret bool) error {
 		}
 		v.values[name] = string(data)
 		v.values[name+".length"] = strconv.Itoa(len(x))
+		v.values[name+".length"+jsonSuffix] = strconv.Itoa(len(x))
 		for i, item := range x {
 			if err := v.flatten(name+"."+strconv.Itoa(i), item, secret); err != nil {
 				return err

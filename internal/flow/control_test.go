@@ -366,3 +366,80 @@ func TestExpectTimeoutShowsObservedValues(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkFiltersConditionsAndJSON(t *testing.T) {
+	var network [][]string
+	posts := 0
+	s := &stub{run: func(_ context.Context, args []string) (json.RawMessage, error) {
+		switch args[0] {
+		case "network":
+			network = append(network, args)
+			if len(args) > 1 && args[1] == "--method=POST" {
+				posts++
+				if posts < 3 {
+					return json.RawMessage(`[{"index":4}]`), nil
+				}
+				return json.RawMessage(`[{"index":4,"requestBody":"{\"message\":\"say ` + "`" + `hi` + "`" + `\"}","requestJson":{"message":"say ` + "`" + `hi` + "`" + `"}},{"index":7,"requestJson":{"message":"two"}}]`), nil
+			}
+			return json.RawMessage(`[]`), nil
+		}
+		return json.RawMessage(`true`), nil
+	}}
+	report, err := Run(context.Background(), []byte(`steps:
+  - expect: {network: {method: POST, url: '**/chat/stream', count: 2}}
+  - network: {method: POST, url: '**/chat/stream', body: true}
+    save: sent
+  - eval: 'check(${sent.0.requestBody|json}, ${sent.0.requestJson|json}, ${sent|json}.length, ${MODE|json}, ${sent.length|json})'
+  - each:
+      items: '${sent}'
+      steps: [{eval: 'seen(${loop.item.requestJson.message|json}, ${loop.index|json})'}]
+  - if: {network: {url: '**/missing'}}
+    then: [{click: x}]
+`), Options{Vars: map[string]string{"MODE": `a"b`}}, s.exec)
+	if err != nil || !report.OK {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	if want := []string{"network", "--method=POST", "--url=**/chat/stream", "--body"}; !reflect.DeepEqual(network[len(network)-2], want) {
+		t.Fatalf("network args=%q", network)
+	}
+	if last := network[len(network)-1]; !reflect.DeepEqual(last, []string{"network", "--url=**/missing"}) {
+		t.Fatalf("condition args=%q", last)
+	}
+	evals := []string{}
+	for _, c := range actions(s) {
+		if c[0] == "eval" {
+			evals = append(evals, c[1])
+		}
+	}
+	want := []string{
+		"check(\"{\\\"message\\\":\\\"say `hi`\\\"}\", {\"message\":\"say `hi`\"}, " + `[{"index":4,"requestBody":"{\"message\":\"say ` + "`hi`" + `\"}","requestJson":{"message":"say ` + "`hi`" + `"}},{"index":7,"requestJson":{"message":"two"}}].length, "a\"b", 2)`,
+		"seen(\"say `hi`\", 0)",
+		`seen("two", 1)`,
+	}
+	if !reflect.DeepEqual(evals, want) {
+		t.Fatalf("evals=\n%s\nwant\n%s", strings.Join(evals, "\n"), strings.Join(want, "\n"))
+	}
+
+	s = &stub{run: func(_ context.Context, args []string) (json.RawMessage, error) {
+		return json.RawMessage(`[{"index":1}]`), nil
+	}}
+	_, err = Run(context.Background(), []byte(`steps: [{expect: {network: {method: POST, count: 2}}, timeout: 50ms}]`), Options{}, s.exec)
+	if err == nil || !strings.Contains(err.Error(), "network: want 2 matching requests, got 1") {
+		t.Fatalf("err=%v", err)
+	}
+	for source, want := range map[string]string{
+		`steps: [{expect: {network: {url: '*/api/*'}}}]`:      "cannot match http(s) URLs",
+		`steps: [{expect: {network: {url: x}, selector: a}}]`: "cannot be combined",
+		`steps: [{network: {url: '**/x', status: 2}}]`:        "status",
+		`steps: [{eval: '${MISSING|json}'}]`:                  "missing variable MISSING",
+	} {
+		_, err := Run(context.Background(), []byte(source), Options{}, (&stub{}).exec)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err=%v want %q", source, err, want)
+		}
+	}
+	_, err = Run(context.Background(), []byte(`steps: [{expect: {network: {url: '**/x'}}}]`), Options{Endpoint: "http://localhost:9222"}, (&stub{}).exec)
+	if err == nil || !strings.Contains(err.Error(), "requires a managed profile") {
+		t.Fatalf("external network condition err=%v", err)
+	}
+}

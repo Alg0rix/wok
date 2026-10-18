@@ -100,6 +100,10 @@ steps:
           then:
             - request: '${req.item.index}'
               save: post
+  - expect: {network: {method: POST, url: '**/api/chat/stream', count: 2}}
+  - network: {method: POST, url: '**/api/chat/stream', body: true}
+    save: sent
+  - expect: {js: '${sent.length|json} === 2 && ${sent.1.requestJson|json}.message === "second" && JSON.parse(${sent.0.requestBody|json}).message === "first follow-up"'}
 `), 0600); err != nil {
 		t.Fatal(err)
 	}

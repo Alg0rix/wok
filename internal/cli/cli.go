@@ -743,7 +743,12 @@ func run(parent context.Context, args []string, out io.Writer) error {
 			return errors.New("persistent recordings require a managed profile")
 		}
 		level := ""
-		if command == "console" && len(a) == 1 {
+		var filter networkFilter
+		if command == "network" {
+			if filter, err = parseNetworkFilter(a); err != nil {
+				return err
+			}
+		} else if command == "console" && len(a) == 1 {
 			level = a[0]
 		} else if len(a) != 0 {
 			return errors.New("recording commands take no positional arguments (console accepts a minimum level)")
@@ -764,6 +769,9 @@ func run(parent context.Context, args []string, out io.Writer) error {
 						m["index"] = i + 1
 					}
 				}
+				result, err = filter.apply(ctx, items, func(index int) (any, error) {
+					return control(ctx, store, state, "GET", "/runtime/request?tab="+url.QueryEscape(p.TargetID)+"&index="+strconv.Itoa(index)+"&part=request-body", nil)
+				})
 			}
 		}
 	case "dialog":

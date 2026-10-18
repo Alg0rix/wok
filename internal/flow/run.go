@@ -21,7 +21,7 @@ func prepareSteps(steps []step, vars *variables, external bool, saved map[string
 		s := &steps[i]
 		label := prefix + strconv.Itoa(i+1)
 		fail := func(err error) error { return fmt.Errorf("step %s: %w", label, err) }
-		if external && (nativeManaged(s.action, s.value) || s.action == "route" || s.action == "unroute" || s.action == "request") {
+		if external && (nativeManaged(s.action, s.value) || s.action == "route" || s.action == "unroute" || s.action == "request" || networkCondition(s.value) != nil) {
 			return fail(fmt.Errorf("%s requires a managed profile", s.action))
 		}
 		if s.value, err = vars.compileValue(s.value, saved); err != nil {
@@ -199,15 +199,8 @@ func (r *runner) step(ctx context.Context, s *step, index int, label string) (js
 func (r *runner) check(ctx context.Context, condition any, timeout time.Duration) (bool, error) {
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	result, err := r.exec(checkCtx, conditionArgs(condition.(map[string]any)), timeout)
-	if err != nil {
-		return false, err
-	}
-	var ok bool
-	if json.Unmarshal(result, &ok) != nil || string(result) == "null" {
-		return false, errors.New("condition must evaluate to a boolean")
-	}
-	return ok, nil
+	ok, _, err := evaluate(checkCtx, condition.(map[string]any), func(c context.Context, args []string) (json.RawMessage, error) { return r.exec(c, args, timeout) })
+	return ok, err
 }
 
 func (r *runner) block(ctx context.Context, s *step, value any, timeout time.Duration, index int, label string) (json.RawMessage, error) {
@@ -263,7 +256,7 @@ func (r *runner) block(ctx context.Context, s *step, value any, timeout time.Dur
 				return nil, fmt.Errorf("while condition still true after max %d iterations", b.max)
 			}
 		}
-		loop := map[string]any{"index": strconv.Itoa(n), "number": strconv.Itoa(n + 1)}
+		loop := map[string]any{"index": n, "number": n + 1}
 		if s.action == "each" {
 			loop["item"] = items[n]
 		}

@@ -832,7 +832,7 @@ var helpSummaries = map[string]string{
 	"sessionstorage-set":    "wok sessionstorage-set KEY VALUE — Set a sessionStorage key",
 	"sessionstorage-delete": "wok sessionstorage-delete KEY — Delete a sessionStorage key",
 	"sessionstorage-clear":  "wok sessionstorage-clear — Clear sessionStorage",
-	"network":               "wok network — List recorded network requests",
+	"network":               "wok network [--method M] [--url GLOB] [--type T] [--body] — List recorded network requests; filters keep each index, --body adds requestBody and parsed requestJson",
 	"requests":              "wok requests — List recorded network requests with 1-based indices",
 	"request":               "wok request INDEX — Inspect a recorded request and response",
 	"request-headers":       "wok request-headers INDEX — Read request headers for a recorded request",

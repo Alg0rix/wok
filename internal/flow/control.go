@@ -14,7 +14,7 @@ const (
 	maxRepeat         = 10000
 	defaultRepeatMax  = 100
 	defaultLoopName   = "loop"
-	conditionFieldSet = "selector text contains value count visible url js frame"
+	conditionFieldSet = "selector text contains value count visible url js frame network"
 )
 
 // block holds the nested steps of an if, repeat, or each step. The step's
@@ -213,6 +213,29 @@ func parseNetworkStep(action string, n *yaml.Node) (any, error) {
 		return nil, errors.New("request must be a request index")
 	}
 	return nil, fmt.Errorf("unsupported action %s", action)
+}
+
+// networkFilterTypes are the fields of a network step filter and of a
+// network condition (which adds count).
+var networkFilterTypes = map[string]string{"method": "string", "url": "string", "type": "string", "body": "bool"}
+
+// networkFilterArgs converts a network filter object to `wok network` flags;
+// `network: true` has none.
+func networkFilterArgs(value any) []string {
+	m, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	args := []string{}
+	for _, key := range []string{"method", "url", "type"} {
+		if v, ok := m[key].(string); ok {
+			args = append(args, "--"+key+"="+v)
+		}
+	}
+	if body, _ := m["body"].(bool); body {
+		args = append(args, "--body")
+	}
+	return args
 }
 
 func networkArgs(action string, value any) ([]string, bool) {

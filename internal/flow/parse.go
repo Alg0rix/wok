@@ -317,7 +317,7 @@ func parseStepDepth(n *yaml.Node, depth int, count *int) (step, error) {
 	return s, nil
 }
 func parseExpect(n *yaml.Node) (map[string]any, error) {
-	f, err := fields(n, "selector", "text", "contains", "value", "count", "visible", "url", "js", "frame")
+	f, err := fields(n, "selector", "text", "contains", "value", "count", "visible", "url", "js", "frame", "network")
 	if err != nil {
 		return nil, err
 	}
@@ -325,6 +325,26 @@ func parseExpect(n *yaml.Node) (map[string]any, error) {
 		return nil, errors.New("expect requires a condition")
 	}
 	out := map[string]any{}
+	if f["network"] != nil {
+		if len(f) != 1 {
+			return nil, errors.New("network cannot be combined with page conditions")
+		}
+		types := map[string]string{"count": "int"}
+		for k, v := range networkFilterTypes {
+			if k != "body" {
+				types[k] = v
+			}
+		}
+		m, err := objectWithTypes(f["network"], types)
+		if err != nil {
+			return nil, fmt.Errorf("network: %w", err)
+		}
+		if c, ok := m["count"].(int); ok && c < 0 {
+			return nil, errors.New("network: count must be a nonnegative integer")
+		}
+		out["network"] = m
+		return out, nil
+	}
 	for k, n := range f {
 		switch k {
 		case "count":

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -163,24 +164,54 @@ func mismatch(m map[string]any, raw json.RawMessage) string {
 	return strings.Join(out, "; ")
 }
 
+// networkCondition returns the filter of a network condition, or nil.
+func networkCondition(value any) map[string]any {
+	m, _ := value.(map[string]any)
+	n, _ := m["network"].(map[string]any)
+	return n
+}
+
+// evaluate checks a condition once. For a network condition it also returns
+// the number of matching requests.
+func evaluate(ctx context.Context, conditions map[string]any, exec Executor) (bool, int, error) {
+	if filter := networkCondition(conditions); filter != nil {
+		result, err := exec(ctx, append([]string{"network"}, networkFilterArgs(filter)...))
+		if err != nil {
+			return false, 0, err
+		}
+		var items []json.RawMessage
+		if err = json.Unmarshal(result, &items); err != nil {
+			return false, 0, errors.New("network returned an unexpected result")
+		}
+		if want, ok := filter["count"].(int); ok {
+			return len(items) == want, len(items), nil
+		}
+		return len(items) > 0, len(items), nil
+	}
+	result, err := exec(ctx, conditionArgs(conditions))
+	if err != nil {
+		return false, 0, err
+	}
+	var passed bool
+	if err = json.Unmarshal(result, &passed); err != nil || string(result) == "null" {
+		return false, 0, errors.New("condition must evaluate to a boolean")
+	}
+	return passed, 0, nil
+}
+
 func assert(ctx context.Context, conditions map[string]any, exec Executor) (json.RawMessage, error) {
-	args := conditionArgs(conditions)
 	ticker := time.NewTicker(75 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, expectFailed(ctx, conditions, exec, err)
 		}
-		result, err := exec(ctx, args)
+		passed, _, err := evaluate(ctx, conditions, exec)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, expectFailed(ctx, conditions, exec, ctx.Err())
 			}
 			return nil, err
-		}
-		var passed bool
-		if err = json.Unmarshal(result, &passed); err != nil || string(result) == "null" {
-			return nil, errors.New("expect eval must return a boolean")
 		}
 		if passed {
 			return json.RawMessage("true"), nil
@@ -200,6 +231,17 @@ func expectFailed(ctx context.Context, conditions map[string]any, exec Executor,
 	}
 	observeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
+	if filter := networkCondition(conditions); filter != nil {
+		_, got, err := evaluate(observeCtx, conditions, exec)
+		if err != nil {
+			return fmt.Errorf("expect timed out (%w); could not read network log: %v", cause, err)
+		}
+		want := "at least 1"
+		if c, ok := filter["count"].(int); ok {
+			want = strconv.Itoa(c)
+		}
+		return fmt.Errorf("expect timed out: network: want %s matching requests, got %d (%w)", want, got, cause)
+	}
 	raw, err := exec(observeCtx, scopedEval(conditions, observeExpression))
 	if err != nil {
 		return fmt.Errorf("expect timed out (%w); could not read page state: %v", cause, err)
