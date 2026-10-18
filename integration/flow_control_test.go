@@ -135,11 +135,30 @@ steps:
 		Times   int    `json:"times"`
 		Hits    int    `json:"hits"`
 	}
-	if err := json.Unmarshal([]byte(run("route-list")), &routes); err != nil || len(routes) != 2 {
-		t.Fatalf("routes=%+v err=%v", routes, err)
+	listRoutes := func() {
+		t.Helper()
+		routes = nil
+		if err := json.Unmarshal([]byte(run("route-list")), &routes); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if routes[0].Pattern != "**/api/**" || routes[0].Hits != 1 || routes[1].Times != 1 || routes[1].Hits != 1 {
-		t.Fatalf("route hits=%+v", routes)
+	// The one-shot route expired after its hit; the base route served the rest.
+	listRoutes()
+	if len(routes) != 1 || routes[0].Pattern != "**/api/**" || routes[0].Hits != 1 {
+		t.Fatalf("routes=%+v", routes)
+	}
+	// Re-registering an untimed route keeps timed routes stacked on it, and
+	// the newest timed route answers first.
+	run("route", "**/api/**", "--status", "201", "--times", "1")
+	run("route", "**/api/**", "--status", "202", "--times", "1")
+	run("route", "**/api/**", "--status", "204")
+	listRoutes()
+	if len(routes) != 3 {
+		t.Fatalf("routes=%+v", routes)
+	}
+	statuses := run("eval", `async () => { const s = []; for (let i = 0; i < 3; i++) s.push((await fetch('/api/x')).status); return s }`)
+	if statuses != "[202,201,204]" {
+		t.Fatalf("statuses=%s", statuses)
 	}
 	run("unroute")
 }

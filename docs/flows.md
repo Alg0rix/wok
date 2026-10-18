@@ -145,23 +145,27 @@ matches anything and `*` matches anything except `/`. Use `**/api/**`;
 `*` matches as a substring.
 
 The newest matching route wins. A route with `times: N` handles N requests and
-then lets older routes or the network answer, so stacked routes give per-request
-responses:
+is then removed, letting older routes or the network answer. Timed routes stack,
+so the last one added answers first; add per-request responses in reverse:
 
 ```yaml
 steps:
   - unroute: true
   - route: {pattern: "**/api/**", status: 200, body: "{}"}
-  - route: {pattern: "**/api/chat/stream", status: 500, times: 1}   # first stream fails
-  - route:
+  - route:                                                          # answers second
       pattern: "**/api/chat/stream"
       times: 1
       contentType: text/event-stream
       body: "data: {\"delta\":\"hi\"}\n\n"
+  - route: {pattern: "**/api/chat/stream", status: 500, times: 1}   # answers first
 ```
 
-Routes persist with the profile until `unroute` (the CLI `route-list` shows
-each route's `hits`). Route bodies are sent whole; when a test needs streaming
+Here the first stream request gets 500, the second gets the event stream, and
+later ones fall through to `**/api/**`. Adding an untimed route replaces the
+untimed route with the same pattern in place, so timed routes above it keep
+answering first. Routes persist with the profile, including partly used timed
+routes, until they expire or `unroute` removes them; the CLI `route-list` shows
+each route's `hits`. Route bodies are sent whole; when a test needs streaming
 timing or responses computed from the request, run your own test server and let
 the flow drive the browser against it. `network: true` lists requests with an
 `index`; `request: INDEX` returns that request's headers and bodies, for example

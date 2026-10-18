@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/alg0rix/wok/internal/observe"
@@ -54,10 +55,13 @@ func prepareSteps(steps []step, vars *variables, external bool, saved map[string
 					return err
 				}
 			} else {
+				// The loop variable exists only inside the body.
+				shadowed := saved[b.as]
 				saved[b.as] = true
 				if err = prepareSteps(b.body, vars, external, saved, label+"."); err != nil {
 					return err
 				}
+				saved[b.as] = shadowed
 			}
 		}
 		if s.save != "" {
@@ -226,7 +230,9 @@ func (r *runner) block(ctx context.Context, s *step, value any, timeout time.Dur
 		case []any:
 			items = x
 		case string:
-			if err := json.Unmarshal([]byte(x), &items); err != nil || items == nil {
+			dec := json.NewDecoder(strings.NewReader(x))
+			dec.UseNumber()
+			if err := dec.Decode(&items); err != nil || items == nil {
 				return nil, errors.New("items must resolve to a JSON array")
 			}
 		}
@@ -234,6 +240,9 @@ func (r *runner) block(ctx context.Context, s *step, value any, timeout time.Dur
 			return nil, fmt.Errorf("items may contain at most %d values", maxRepeat)
 		}
 	}
+	// Restore an outer loop's or saved variable with the same name on exit.
+	outer := r.vars.snapshot(b.as)
+	defer r.vars.restore(b.as, outer)
 	n := 0
 	for {
 		if err := ctx.Err(); err != nil {

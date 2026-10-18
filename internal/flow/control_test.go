@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -221,5 +222,60 @@ func TestControlValidation(t *testing.T) {
 	_, err := Run(context.Background(), []byte(`steps: [{route: {pattern: '**/x'}}]`), Options{Endpoint: "http://localhost:9222"}, (&stub{}).exec)
 	if err == nil || !strings.Contains(err.Error(), "requires a managed profile") {
 		t.Fatalf("external route err=%v", err)
+	}
+}
+
+func TestLoopScopingRedactionAndPrecision(t *testing.T) {
+	s := &stub{run: func(_ context.Context, args []string) (json.RawMessage, error) {
+		switch {
+		case args[0] == "eval" && args[1] == "ids()":
+			return json.RawMessage(`[1, 9007199254740993]`), nil
+		case args[0] == "eval" && args[1] == "user()":
+			return json.RawMessage(`{"name":"ana"}`), nil
+		case args[0] == "click" && args[1] == "#boom":
+			return nil, errors.New("boom 1")
+		}
+		return json.RawMessage(`{}`), nil
+	}}
+	report, err := Run(context.Background(), []byte(`steps:
+  - eval: 'user()'
+    save: user
+  - eval: 'ids()'
+    save: ids
+  - repeat:
+      times: 2
+      steps:
+        - repeat:
+            times: 3
+            steps: [{type: 'inner ${loop.index}'}]
+        - type: 'outer ${loop.index}'
+  - each:
+      items: '${ids}'
+      as: user
+      steps: [{type: 'id ${user.item}'}]
+  - type: 'name ${user.name}'
+  - each:
+      items: '${ids}'
+      steps: [{click: '#boom'}]
+`), Options{}, s.exec)
+	got := []string{}
+	for _, c := range actions(s) {
+		if c[0] == "type" {
+			got = append(got, c[1])
+		}
+	}
+	want := []string{"inner 0", "inner 1", "inner 2", "outer 0", "inner 0", "inner 1", "inner 2", "outer 1", "id 1", "id 9007199254740993", "name ana"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("typed=%q\nwant %q", got, want)
+	}
+	if err == nil || !strings.HasPrefix(err.Error(), "step 6[1].1 (click): boom 1") || report.Error != err.Error() {
+		t.Fatalf("err=%v report.Error=%q", err, report.Error)
+	}
+	_, err = Run(context.Background(), []byte(`steps:
+  - repeat: {times: 1, steps: [{click: a}]}
+  - type: '${loop.index}'
+`), Options{}, (&stub{}).exec)
+	if err == nil || !strings.Contains(err.Error(), "missing variable loop.index") {
+		t.Fatalf("loop variable leaked past its loop: %v", err)
 	}
 }

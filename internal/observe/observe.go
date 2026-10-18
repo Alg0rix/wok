@@ -370,7 +370,10 @@ func (m *Manager) handle(event cdp.Event) {
 		return
 	}
 	if event.Method == "Fetch.requestPaused" {
-		go m.fetchPaused(event)
+		// Pick the route on the ordered event goroutine so timed routes are
+		// consumed in request order; only the protocol reply runs async.
+		route := m.matchRoute(event)
+		go m.fetchPaused(event, route)
 		return
 	}
 	if event.Method == "Page.javascriptDialogOpening" {

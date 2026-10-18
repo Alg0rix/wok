@@ -153,7 +153,9 @@ func Run(ctx context.Context, source []byte, opts Options, exec Executor) (repor
 		return exec(c, route(args, timeout))
 	}}
 	if err = r.run(ctx, doc.steps, 0, ""); err != nil {
-		return fail(err)
+		// run already redacted the step error before adding its path.
+		report.Error = err.Error()
+		return report, err
 	}
 	failedIndex = 0
 	return report, nil

@@ -21,8 +21,8 @@ import (
 // Route mocks or blocks requests whose URL matches Pattern (a glob where **
 // matches anything and * matches anything except "/"; a pattern without
 // wildcards matches as a substring). The newest matching route wins. A route
-// with Times > 0 handles that many requests, then lets older routes or the
-// network handle later ones.
+// with Times > 0 handles that many requests and is then removed, letting older
+// routes or the network handle later ones.
 type Route struct {
 	Pattern     string            `json:"pattern"`
 	Status      int               `json:"status,omitempty"`
@@ -183,29 +183,47 @@ func (m *Manager) applyFetchAll() error {
 	return nil
 }
 
-// fetchPaused fulfils matching routes, then falls back to proxy handling.
-func (m *Manager) fetchPaused(event cdp.Event) {
-	var p struct {
-		RequestID string `json:"requestId"`
-		Request   struct {
-			URL string `json:"url"`
-		} `json:"request"`
+type pausedRequest struct {
+	RequestID string `json:"requestId"`
+	Request   struct {
+		URL string `json:"url"`
+	} `json:"request"`
+}
+
+// matchRoute returns a copy of the newest route matching a paused request and
+// counts the hit. A timed route is removed when its last hit is used.
+func (m *Manager) matchRoute(event cdp.Event) *Route {
+	var p pausedRequest
+	if json.Unmarshal(event.Params, &p) != nil || p.RequestID == "" {
+		return nil
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.routes) - 1; i >= 0; i-- {
+		r := m.routes[i]
+		if !r.re.MatchString(p.Request.URL) {
+			continue
+		}
+		r.Hits++
+		copied := *r
+		if r.Times > 0 {
+			if r.Hits >= r.Times {
+				m.routes = append(m.routes[:i:i], m.routes[i+1:]...)
+				go func() { _ = m.applyFetchAll() }()
+			}
+			_ = m.saveRoutesLocked()
+		}
+		return &copied
+	}
+	return nil
+}
+
+// fetchPaused fulfils the matched route, then falls back to proxy handling.
+func (m *Manager) fetchPaused(event cdp.Event, route *Route) {
+	var p pausedRequest
 	if json.Unmarshal(event.Params, &p) != nil || p.RequestID == "" {
 		return
 	}
-	m.mu.Lock()
-	var route *Route
-	for i := len(m.routes) - 1; i >= 0; i-- {
-		r := m.routes[i]
-		if (r.Times == 0 || r.Hits < r.Times) && r.re.MatchString(p.Request.URL) {
-			r.Hits++
-			copied := *r
-			route = &copied
-			break
-		}
-	}
-	m.mu.Unlock()
 	if route == nil {
 		if m.config.ProxyUsername != "" {
 			m.proxy(event)
@@ -467,15 +485,21 @@ func (m *Manager) serveRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 		route.Hits = 0
 		m.mu.Lock()
-		// A timed route stacks on top of routes with the same pattern; an
-		// untimed route replaces them.
-		kept := m.routes[:0]
-		for _, existing := range m.routes {
-			if route.Times > 0 || existing.Pattern != route.Pattern {
-				kept = append(kept, existing)
+		// A timed route stacks on top. An untimed route replaces the untimed
+		// route with that pattern in place, so timed routes above it still
+		// answer first.
+		replaced := false
+		if route.Times == 0 {
+			for i, existing := range m.routes {
+				if existing.Times == 0 && existing.Pattern == route.Pattern {
+					m.routes[i], replaced = route, true
+					break
+				}
 			}
 		}
-		m.routes = append(kept, route)
+		if !replaced {
+			m.routes = append(m.routes, route)
+		}
 	case http.MethodDelete:
 		pattern := r.URL.Query().Get("pattern")
 		m.mu.Lock()

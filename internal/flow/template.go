@@ -190,6 +190,29 @@ func (v *variables) setLocal(name string, value any) {
 	_ = v.flatten(name, value, false)
 }
 
+// snapshot copies the values stored under name and name.*.
+func (v *variables) snapshot(name string) map[string]string {
+	out := map[string]string{}
+	for k, val := range v.values {
+		if k == name || strings.HasPrefix(k, name+".") {
+			out[k] = val
+		}
+	}
+	return out
+}
+
+// restore replaces the values under name and name.* with a snapshot.
+func (v *variables) restore(name string, saved map[string]string) {
+	for k := range v.values {
+		if k == name || strings.HasPrefix(k, name+".") {
+			delete(v.values, k)
+		}
+	}
+	for k, val := range saved {
+		v.values[k] = val
+	}
+}
+
 // flatten stores scalars under name, object fields under name.FIELD, and
 // arrays as JSON text under name plus name.N items and name.length.
 func (v *variables) flatten(name string, value any, secret bool) error {
@@ -216,7 +239,8 @@ func (v *variables) flatten(name string, value any, secret bool) error {
 		return nil
 	default:
 		var s string
-		if text, ok := value.(string); ok {
+		text, isText := value.(string)
+		if isText {
 			s = text
 		} else {
 			data, err := json.Marshal(value)
@@ -226,7 +250,9 @@ func (v *variables) flatten(name string, value any, secret bool) error {
 			s = string(data)
 		}
 		v.values[name] = s
-		if secret && s != "" {
+		// Numbers and booleans are not redacted: short values such as "1"
+		// would otherwise mangle step paths and messages.
+		if secret && isText && s != "" {
 			v.secrets[s] = true
 		}
 		return nil
