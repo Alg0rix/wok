@@ -189,12 +189,21 @@ directory as a routine recovery step. `stop` preserves profile data on disk.
 Stop profiles created for temporary tests when done; leave an existing shared
 profile running unless the task requests its closure.
 
+## Extended actions, network routing, and DevTools
+
+Wok also supports the full interactive and DevTools command set (`-s=NAME` is a shorthand for `--profile NAME`, and `--raw` prints string results without JSON quotes):
+
+- **Element & pointer**: `dblclick`, `hover`, `drag`, `drop`, `select`, `check`, `uncheck`, `upload`, `mousemove`, `mousedown`, `mouseup`, `mousewheel`, `keydown`, `keyup`, `generate-locator`, `highlight`
+- **Navigation & output**: `goto`, `go-back`, `go-forward`, `reload`, `resize`, `screenshot [file] [target]`, `pdf [file]`
+- **Storage & state**: `state-save`, `state-load`, `cookie-list|get|set|delete|clear`, `localstorage-list|get|set|delete|clear`, `sessionstorage-list|get|set|delete|clear`, `dialog-accept`, `dialog-dismiss`, `delete-data`
+- **Network & DevTools**: `requests`, `request`, `request-headers`, `request-body`, `response-headers`, `response-body`, `route`, `route-list`, `unroute`, `network-state-set`, `console [min-level]`, `run-code`, `recording-start|stop`, `tracing-start|stop`, `video-start|stop|chapter`, `video-show-actions|video-hide-actions`, `pause-at`, `resume`, `step-over`
+- **Sessions**: `open [url]`, `attach`, `detach`, `close`, `list`, `close-all`, `kill-all`, `show`, `install`, `install-browser`
+
+Run `wok --help COMMAND` for any command's usage.
+
 ## Limits and protocol escape hatch
 
-CSS/ref element actions currently target the main document. Do not assume
-iframe/shadow-root traversal, file uploads, download management, or automatic
-Playwright-style locator retries. The snapshot is a flat accessibility listing.
-Use a full browser screenshot when a task depends on appearance.
+CSS/ref element actions target the main document. The snapshot is a flat accessibility listing (`snapshot [target]` scopes to a subtree). Use a full browser screenshot when a task depends on appearance.
 
 For a supported CDP operation that has no convenience command:
 

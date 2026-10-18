@@ -47,3 +47,25 @@ func TestSkillCommandsOffline(t *testing.T) {
 		t.Fatal("offline skills command opened browser state", err)
 	}
 }
+
+func TestHelpSummariesAndRaw(t *testing.T) {
+	o, args, err := Parse([]string{"-s=my-session", "--raw", "goto", "https://example.com"})
+	if err != nil || o.Profile != "my-session" || !o.Raw || len(args) != 2 {
+		t.Fatalf("%+v %v %v", o, args, err)
+	}
+	for name := range helpSummaries {
+		var out, errs bytes.Buffer
+		if code := Run(context.Background(), []string{"--help", name}, &out, &errs); code != 0 || out.Len() == 0 {
+			t.Fatalf("--help %s: %d %s", name, code, errs.String())
+		}
+		out.Reset()
+		if code := Run(context.Background(), []string{name, "--help"}, &out, &errs); code != 0 || out.Len() == 0 {
+			t.Fatalf("%s --help: %d %s", name, code, errs.String())
+		}
+	}
+	var rawBuf bytes.Buffer
+	w := &rawWriter{w: &rawBuf}
+	if err := emit(w, "plain value"); err != nil || rawBuf.String() != "plain value\n" {
+		t.Fatalf("rawWriter: %q %v", rawBuf.String(), err)
+	}
+}

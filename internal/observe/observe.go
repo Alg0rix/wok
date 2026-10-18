@@ -45,6 +45,12 @@ type NetworkEntry struct {
 	Finished   bool    `json:"finished"`
 	loader     string
 	started    float64
+	// Details for `wok request`; bodies are fetched lazily from the browser.
+	requestHeaders  map[string]any
+	responseHeaders map[string]any
+	postData        string
+	hasPostData     bool
+	mimeType        string
 }
 type DownloadEntry struct {
 	GUID              string  `json:"guid"`
@@ -86,6 +92,7 @@ type tab struct {
 	authNetwork  map[string]string
 	dialogs      []DialogEntry
 	lastActivity int64
+	debug        *debugState
 }
 type Manager struct {
 	c           *cdp.Client
@@ -105,6 +112,11 @@ type Manager struct {
 	policyMu    sync.Mutex
 	unsubs      []func()
 	barriers    chan chan struct{}
+	routes      []*Route
+	recording   *recording
+	video       *video
+	traceMu     sync.Mutex
+	tracing     bool
 }
 
 // New subscribes before enabling browser events and starts discovering pages.
@@ -133,6 +145,10 @@ func New(ctx context.Context, c *cdp.Client, config Config) (*Manager, error) {
 			return nil, fmt.Errorf("load Wok dialog policy: %w", err)
 		}
 	} else if !os.IsNotExist(err) {
+		cancel()
+		return nil, err
+	}
+	if err = m.loadRoutes(); err != nil {
 		cancel()
 		return nil, err
 	}
@@ -349,8 +365,12 @@ func (m *Manager) handle(event cdp.Event) {
 		}
 		return
 	}
-	if event.Method == "Fetch.authRequired" || event.Method == "Fetch.requestPaused" {
+	if event.Method == "Fetch.authRequired" {
 		m.proxy(event)
+		return
+	}
+	if event.Method == "Fetch.requestPaused" {
+		go m.fetchPaused(event)
 		return
 	}
 	if event.Method == "Page.javascriptDialogOpening" {
@@ -368,6 +388,8 @@ func (m *Manager) handle(event cdp.Event) {
 		return
 	}
 	switch event.Method {
+	case "Runtime.bindingCalled", "Page.screencastFrame", "Debugger.paused", "Debugger.resumed":
+		m.devtoolsEventLocked(t, event)
 	case "Runtime.consoleAPICalled":
 		var p struct {
 			Type      string            `json:"type"`
@@ -472,14 +494,17 @@ func (m *Manager) handle(event cdp.Event) {
 				Status int `json:"status"`
 			} `json:"redirectResponse"`
 			Request struct {
-				URL    string `json:"url"`
-				Method string `json:"method"`
+				URL         string         `json:"url"`
+				Method      string         `json:"method"`
+				Headers     map[string]any `json:"headers"`
+				PostData    string         `json:"postData"`
+				HasPostData bool           `json:"hasPostData"`
 			} `json:"request"`
 		}
 		if json.Unmarshal(event.Params, &p) != nil {
 			return
 		}
-		record := &NetworkEntry{RequestID: p.RequestID, URL: p.Request.URL, Method: p.Request.Method, Type: p.Type, started: p.Timestamp, loader: p.LoaderID}
+		record := &NetworkEntry{RequestID: p.RequestID, URL: p.Request.URL, Method: p.Request.Method, Type: p.Type, started: p.Timestamp, loader: p.LoaderID, requestHeaders: p.Request.Headers, postData: p.Request.PostData, hasPostData: p.Request.HasPostData}
 		if old := t.requests[p.RequestID]; old != nil {
 			old.Finished = true
 			if p.RedirectResponse != nil {
@@ -504,7 +529,9 @@ func (m *Manager) handle(event cdp.Event) {
 			RequestID string `json:"requestId"`
 			Type      string `json:"type"`
 			Response  struct {
-				Status int `json:"status"`
+				Status   int            `json:"status"`
+				Headers  map[string]any `json:"headers"`
+				MimeType string         `json:"mimeType"`
 			} `json:"response"`
 		}
 		if json.Unmarshal(event.Params, &p) != nil {
@@ -513,6 +540,8 @@ func (m *Manager) handle(event cdp.Event) {
 		if record := t.requests[p.RequestID]; record != nil {
 			record.Status = p.Response.Status
 			record.Type = p.Type
+			record.responseHeaders = p.Response.Headers
+			record.mimeType = p.Response.MimeType
 		}
 		if p.Type == "WebSocket" || p.Type == "EventSource" {
 			delete(t.inflight, p.RequestID)
@@ -785,6 +814,7 @@ func (m *Manager) setupTab(ctx context.Context, id, session string) error {
 		m.frames[tree.FrameTree.Frame.ID] = id
 		m.mu.Unlock()
 	}
+	m.setupDevtools(session)
 	return nil
 }
 func (m *Manager) attached(event cdp.Event) {

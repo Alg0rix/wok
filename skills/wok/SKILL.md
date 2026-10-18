@@ -71,6 +71,6 @@ Commands detach when finished and leave the browser running. Stop a profile only
 wok --profile research stop
 ```
 
-Stopping preserves profile data. Do not close a shared external browser as routine cleanup.
+Stopping preserves profile data (`delete-data` wipes it). Do not close a shared external browser as routine cleanup.
 
-For tab targeting, keyboard combinations, live-view troubleshooting, and raw CDP, read [references/commands.md](references/commands.md).
+For tab targeting (`tab-list`, `tab-select`), extended actions (`dblclick`, `hover`, `drag`, `drop`, `select`, `check`, `uncheck`), raw keyboard/mouse (`keydown`, `keyup`, `mousemove`, `mousedown`, `mouseup`, `mousewheel`), storage state (`state-save`, `state-load`, `cookie-*`, `localstorage-*`, `sessionstorage-*`), network routing (`requests`, `request`, `route`), DevTools (`recording-start`, `tracing-start`, `video-start`, `pause-at`, `generate-locator`, `highlight`), and raw CDP, read [references/commands.md](references/commands.md).

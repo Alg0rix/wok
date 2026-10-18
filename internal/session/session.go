@@ -40,6 +40,10 @@ type State struct {
 	RenderURL     string          `json:"renderUrl,omitempty"`
 	Token         string          `json:"renderToken,omitempty"`
 	Refs          json.RawMessage `json:"refs,omitempty"`
+	// Mouse is the last pointer position and MouseButtons the pressed-button
+	// mask, so raw mouse commands compose across CLI processes.
+	Mouse        []float64 `json:"mouse,omitempty"`
+	MouseButtons int       `json:"mouseButtons,omitempty"`
 }
 
 type Store struct {

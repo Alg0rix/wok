@@ -70,9 +70,20 @@ Browser:
   set viewport W H [DPR]   Viewport shorthand
   tab list|new [URL]|select ID|close [ID]
   cdp METHOD [JSON]         Raw page CDP; --browser-level for browser CDP
+  dblclick|hover|drag|drop|select|check|uncheck  Extended element actions
+  go-back|go-forward|reload|keydown|keyup        Navigation and key events
+  mousemove|mousedown|mouseup|mousewheel         Raw pointer events
+  pdf|state-save|state-load                      Save PDF or storage state
+  request|route|route-list|unroute               Network inspection and mocking
+  recording-start|recording-stop                 Record user actions as script
+  tracing-start|tracing-stop                     Chromium trace capture
+  video-start|video-stop|video-chapter           Screencast video recording
+  pause-at|resume|step-over                      JavaScript debugger controls
+  generate-locator|highlight                     Element locator and overlay
+  attach|detach|close-all|kill-all|delete-data   Session management
 
 Options (before or after command; -- ends option parsing):
-  --profile NAME           Isolated persistent profile (default: default)
+  -s, --session, --profile NAME  Isolated persistent profile (default: default)
   --cdp URL                Attach external HTTP or WebSocket CDP browser
   --tab ID                 Select a target for this invocation
   --timeout DURATION       Total timeout (15s; start/browser install/run: 5m)
@@ -88,13 +99,14 @@ Options (before or after command; -- ends option parsing):
   --proxy URL              HTTP(S)/SOCKS proxy; HTTP user:pass supported
   --proxy-bypass PATTERNS   Comma-separated Chromium bypass patterns
   --json                   JSON snapshot (other results are always JSON)
+  --raw                    Print string results without JSON quotes
   --close-external         Permit stop against an explicitly supplied --cdp
   --browser-level          Send raw CDP to browser instead of active page
-  --help, --version
+  --help [COMMAND], --version
 
 Environment: WOK_HOME overrides private state root; WOK_BROWSER overrides browser.
 WOK_BROWSER_CACHE overrides the shared browser download cache.
-Prefers chrome-headless-shell, then Chromium/Chrome. Linux and macOS supported.
+Prefers chrome-headless-shell, then Chromium/Chrome. Linux, macOS and Windows supported.
 Every action detaches on exit and leaves the browser running.
 `
 
@@ -106,6 +118,7 @@ type Options struct {
 	Profile, Endpoint, Tab, Browser                                string
 	Timeout                                                        time.Duration
 	Headed, NoSandbox, NoRender, JSON, CloseExternal, BrowserLevel bool
+	Raw                                                            bool
 }
 
 func Parse(args []string) (Options, []string, error) {
@@ -119,7 +132,7 @@ func Parse(args []string) (Options, []string, error) {
 		}
 		key, value, has := strings.Cut(a, "=")
 		switch key {
-		case "--profile", "--cdp", "--tab", "--timeout", "--browser", "--listen", "--port", "--auth-token", "--embed-origin", "--download-dir", "--proxy", "--proxy-bypass":
+		case "-s", "--session", "--profile", "--cdp", "--tab", "--timeout", "--browser", "--listen", "--port", "--auth-token", "--embed-origin", "--download-dir", "--proxy", "--proxy-bypass":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -149,7 +162,7 @@ func Parse(args []string) (Options, []string, error) {
 				o.Proxy = value
 			case "--proxy-bypass":
 				o.ProxyBypass = value
-			case "--profile":
+			case "-s", "--session", "--profile":
 				o.ProfileSet = true
 				o.Profile = value
 			case "--cdp":
@@ -172,7 +185,7 @@ func Parse(args []string) (Options, []string, error) {
 				}
 				o.Timeout = d
 			}
-		case "--headed", "--no-sandbox", "--no-render", "--json", "--close-external", "--browser-level":
+		case "--headed", "--no-sandbox", "--no-render", "--json", "--raw", "--close-external", "--browser-level":
 			if has {
 				return o, nil, fmt.Errorf("%s does not accept a value", key)
 			}
@@ -185,6 +198,8 @@ func Parse(args []string) (Options, []string, error) {
 				o.NoRender = true
 			case "--json":
 				o.JSON = true
+			case "--raw":
+				o.Raw = true
 			case "--close-external":
 				o.CloseExternal = true
 			case "--browser-level":
@@ -220,29 +235,34 @@ func run(parent context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if o.Raw {
+		out = &rawWriter{w: out}
+	}
 	if len(a) == 0 || a[0] == "help" || a[0] == "--help" || a[0] == "-h" {
+		if len(a) == 2 {
+			return commandHelp(out, a[1])
+		}
 		_, err = io.WriteString(out, Help)
 		return err
+	}
+	if len(a) == 2 && (a[1] == "--help" || a[1] == "-h") {
+		return commandHelp(out, a[0])
 	}
 	if a[0] == "--version" || a[0] == "version" {
 		return emit(out, map[string]string{"name": "wok", "version": version.Version})
 	}
-	if !o.TimeoutSet && (a[0] == "start" || a[0] == "browser" || a[0] == "run") {
+	command, a := alias(a[0], a[1:])
+	if !o.TimeoutSet && (command == "start" || command == "browser" || command == "run") {
 		o.Timeout = 5 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(parent, o.Timeout)
-	if a[0] == "terminal" && !o.TimeoutSet {
+	if command == "terminal" && !o.TimeoutSet {
 		cancel()
 		ctx, cancel = context.WithCancel(parent)
 	}
 	defer cancel()
-	command := a[0]
-	a = a[1:]
-	if command == "exec" {
-		return runExec(ctx, a, o, out)
-	}
-	if command == "run" {
-		return runFlow(ctx, a, o, out)
+	if command == "install" && len(a) == 0 {
+		a = []string{"skills"}
 	}
 	if command == "browser" {
 		if len(a) != 1 || a[0] != "install" {
@@ -260,11 +280,6 @@ func run(parent context.Context, args []string, out io.Writer) error {
 		}
 		return skills.Run(append([]string{"install"}, a[1:]...), out)
 	}
-	switch command {
-	case "skills", "profile", "start", "stop", "status", "render", "open", "snapshot", "click", "fill", "type", "press", "get", "eval", "wait", "screenshot", "terminal", "viewport", "set", "find", "cookies", "storage", "upload", "console", "errors", "network", "downloads", "dialogs", "dialog", "tab", "cdp":
-	default:
-		return fmt.Errorf("unknown command %q; run wok help", command)
-	}
 	if command == "skills" {
 		return skills.Run(a, out)
 	}
@@ -273,6 +288,78 @@ func run(parent context.Context, args []string, out io.Writer) error {
 			return errors.New("usage: wok profile list")
 		}
 		return listProfiles(ctx, out)
+	}
+	switch command {
+	case "close-all", "kill-all":
+		if len(a) != 0 {
+			return errors.New("usage: wok " + command)
+		}
+		return closeAll(ctx, out, command == "kill-all")
+	case "attach", "detach":
+		if o.Endpoint != "" {
+			return errors.New(command + " takes the endpoint as an argument; omit --cdp")
+		}
+		path, e := attachFile(o.Profile)
+		if e != nil {
+			return e
+		}
+		if command == "detach" {
+			if len(a) != 0 {
+				return errors.New("usage: wok detach")
+			}
+			if e = os.Remove(path); e != nil && !os.IsNotExist(e) {
+				return e
+			}
+			return emit(out, map[string]any{"profile": o.Profile, "attached": false})
+		}
+		if len(a) == 0 {
+			if data, e := os.ReadFile(path); e == nil {
+				return emit(out, map[string]any{"profile": o.Profile, "attached": true, "endpoint": strings.TrimSpace(string(data))})
+			}
+			return emit(out, map[string]any{"profile": o.Profile, "attached": false})
+		}
+		if len(a) != 1 {
+			return errors.New("usage: wok attach [NAME|CDP_URL]")
+		}
+		endpoint, e := resolveAttachTarget(ctx, a[0])
+		if e != nil {
+			return e
+		}
+		if e = session.AtomicWrite(path, []byte(endpoint)); e != nil {
+			return e
+		}
+		return emit(out, map[string]any{"profile": o.Profile, "attached": true, "endpoint": endpoint})
+	}
+	if o.Endpoint == "" && command != "start" && command != "render" && command != "delete-data" {
+		// A profile attached to an external browser behaves as if --cdp were given.
+		if path, e := attachFile(o.Profile); e == nil {
+			if data, e := os.ReadFile(path); e == nil {
+				o.Endpoint = strings.TrimSpace(string(data))
+			}
+		}
+	}
+	if command == "run-code" {
+		if len(a) > 1 {
+			return errors.New("usage: wok run-code [CODE]")
+		}
+		var src io.Reader = os.Stdin
+		if len(a) == 1 {
+			src = strings.NewReader(a[0])
+		}
+		return runExecSource(ctx, src, o, out)
+	}
+	if command == "exec" {
+		return runExec(ctx, a, o, out)
+	}
+	if command == "run" {
+		return runFlow(ctx, a, o, out)
+	}
+	switch command {
+	case "start", "stop", "status", "render", "open", "snapshot", "click", "fill", "type", "press", "get", "eval", "wait", "screenshot", "terminal", "viewport", "set", "find", "cookies", "storage", "upload", "console", "errors", "network", "downloads", "dialogs", "dialog", "tab", "cdp", "delete-data":
+	default:
+		if !pageCommands[command] {
+			return fmt.Errorf("unknown command %q; run wok help", command)
+		}
 	}
 	external := o.Endpoint != ""
 	if external {
@@ -308,6 +395,15 @@ func run(parent context.Context, args []string, out io.Writer) error {
 	}
 	unlock = sync.OnceFunc(unlock)
 	defer unlock()
+	if command == "delete-data" {
+		if external {
+			return errors.New("delete-data manages local profiles; omit --cdp")
+		}
+		if len(a) != 0 {
+			return errors.New("usage: wok delete-data")
+		}
+		return deleteData(ctx, store, out)
+	}
 	if command == "start" {
 		if len(a) != 0 {
 			return errors.New("usage: wok start")
@@ -418,7 +514,10 @@ func run(parent context.Context, args []string, out io.Writer) error {
 			return emit(out, map[string]string{"targetId": r.TargetID})
 		case "select":
 			if len(a) != 2 {
-				return errors.New("usage: wok tab select ID")
+				return errors.New("usage: wok tab select ID|INDEX")
+			}
+			if a[1], err = tabByIndex(ctx, client, a[1]); err != nil {
+				return err
 			}
 			targets, e := browser.Targets(ctx, client)
 			if e != nil {
@@ -447,7 +546,9 @@ func run(parent context.Context, args []string, out io.Writer) error {
 				id = o.Tab
 			}
 			if len(a) == 2 {
-				id = a[1]
+				if id, err = tabByIndex(ctx, client, a[1]); err != nil {
+					return err
+				}
 			}
 			if id == "" {
 				return errors.New("specify a tab ID or select a tab first")
@@ -511,7 +612,18 @@ func run(parent context.Context, args []string, out io.Writer) error {
 		}
 	}
 	var result any = map[string]bool{"ok": true}
+	if external && managedOnly[command] {
+		return errors.New(command + " requires a managed profile; omit --cdp")
+	}
+	if annotatedCommands[command] {
+		annotate(ctx, p, store, command, a, &refs)
+	}
+	if pageCommands[command] {
+		result, err = pageCommand(ctx, command, a, p, store, state, &refs)
+		command = ""
+	}
 	switch command {
+	case "":
 	case "terminal":
 		unlock()
 		return showTerminal(ctx, p, state, a, out)
@@ -525,13 +637,22 @@ func run(parent context.Context, args []string, out io.Writer) error {
 		}
 	case "snapshot":
 		interactive := false
-		if len(a) == 1 && a[0] == "-i" {
-			interactive = true
-		} else if len(a) > 0 {
-			return errors.New("usage: wok snapshot [-i]")
+		root := ""
+		for _, arg := range a {
+			if arg == "-i" && !interactive {
+				interactive = true
+			} else if root == "" && arg != "-i" {
+				root = arg
+			} else {
+				return errors.New("usage: wok snapshot [-i] [TARGET]")
+			}
 		}
 		var nodes []browser.SnapshotNode
-		nodes, err = p.Snapshot(ctx, interactive, &refs)
+		if root != "" {
+			nodes, err = p.SnapshotOf(ctx, root, interactive, &refs)
+		} else {
+			nodes, err = p.Snapshot(ctx, interactive, &refs)
+		}
 		result = nodes
 		if err == nil && !o.JSON {
 			if err = saveRefs(store, state, &refs); err != nil {
@@ -545,8 +666,12 @@ func run(parent context.Context, args []string, out io.Writer) error {
 			return nil
 		}
 	case "click":
+		if len(a) == 2 {
+			err = p.ClickButton(ctx, a[0], &refs, a[1], 1)
+			break
+		}
 		if len(a) != 1 {
-			return errors.New("usage: wok click SELECTOR|@eN")
+			return errors.New("usage: wok click SELECTOR|@eN [left|right|middle]")
 		}
 		err = p.Click(ctx, a[0], &refs)
 	case "fill":
@@ -565,8 +690,12 @@ func run(parent context.Context, args []string, out io.Writer) error {
 		}
 		err = p.Press(ctx, a[0])
 	case "eval":
+		if len(a) == 2 {
+			result, err = p.EvalOn(ctx, a[1], a[0], &refs)
+			break
+		}
 		if len(a) != 1 {
-			return errors.New("usage: wok eval JAVASCRIPT")
+			return errors.New("usage: wok eval JAVASCRIPT, or eval 'el => ...' TARGET")
 		}
 		result, err = p.Eval(ctx, a[0])
 	case "get":
@@ -586,6 +715,9 @@ func run(parent context.Context, args []string, out io.Writer) error {
 		}
 		result, err = p.Get(ctx, kind, selector, attr, &refs)
 	case "find":
+		if len(a) == 1 {
+			a = []string{"text", a[0]}
+		}
 		result, err = find(ctx, p, a, &refs)
 	case "cookies":
 		result, err = cookies(ctx, p, a)
@@ -600,14 +732,30 @@ func run(parent context.Context, args []string, out io.Writer) error {
 		if external {
 			return errors.New("persistent recordings require a managed profile")
 		}
-		if len(a) != 0 {
-			return errors.New("recording commands take no positional arguments")
+		level := ""
+		if command == "console" && len(a) == 1 {
+			level = a[0]
+		} else if len(a) != 0 {
+			return errors.New("recording commands take no positional arguments (console accepts a minimum level)")
 		}
 		path := "/runtime/" + command
 		if command != "downloads" {
 			path += "?tab=" + url.QueryEscape(p.TargetID)
 		}
 		result, err = control(ctx, store, state, "GET", path, nil)
+		if err == nil && level != "" {
+			result, err = consoleFilter(result, level)
+		}
+		if err == nil && command == "network" {
+			// Number requests for `wok request INDEX`.
+			if items, ok := result.([]any); ok {
+				for i, item := range items {
+					if m, ok := item.(map[string]any); ok {
+						m["index"] = i + 1
+					}
+				}
+			}
+		}
 	case "dialog":
 		if external {
 			return errors.New("dialog policy requires a managed profile")
@@ -627,15 +775,29 @@ func run(parent context.Context, args []string, out io.Writer) error {
 	case "wait":
 		err = wait(ctx, p, store, state, a)
 	case "screenshot":
-		if len(a) != 1 {
-			return errors.New("usage: wok screenshot FILE")
+		if len(a) > 2 {
+			return errors.New("usage: wok screenshot [FILE] [TARGET]")
+		}
+		name, selector := defaultName("screenshot", ".png"), ""
+		if len(a) == 1 {
+			if isSelectorTarget(a[0], &refs) {
+				selector = a[0]
+			} else {
+				name = a[0]
+			}
+		} else if len(a) == 2 {
+			name, selector = a[0], a[1]
 		}
 		var data []byte
-		data, err = screenshot(ctx, state, p)
-		if err == nil {
-			err = os.WriteFile(a[0], data, 0600)
+		if selector != "" {
+			data, err = p.ElementScreenshot(ctx, selector, &refs)
+		} else {
+			data, err = screenshot(ctx, state, p)
 		}
-		result = map[string]any{"path": a[0], "bytes": len(data)}
+		if err == nil {
+			err = os.WriteFile(name, data, 0600)
+		}
+		result = map[string]any{"path": name, "bytes": len(data)}
 	case "cdp":
 		return rawCDP(ctx, out, client, p.SessionID, a)
 	default:

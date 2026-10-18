@@ -79,6 +79,11 @@ func runExec(ctx context.Context, args []string, o Options, out io.Writer) error
 		defer file.Close()
 		source = file
 	}
+	return runExecSource(ctx, source, o, out)
+}
+
+// runExecSource runs newline-separated command lines from source.
+func runExecSource(ctx context.Context, source io.Reader, o Options, out io.Writer) error {
 	scanner := bufio.NewScanner(io.LimitReader(source, (1<<20)+1))
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 	type lineResult struct {
@@ -104,7 +109,7 @@ func runExec(ctx context.Context, args []string, o Options, out io.Writer) error
 		if len(command) == 0 {
 			continue
 		}
-		if command[0] == "exec" || command[0] == "run" || command[0] == "terminal" {
+		if command[0] == "exec" || command[0] == "run" || command[0] == "run-code" || command[0] == "terminal" {
 			return errors.New("nested batches and interactive terminal are not allowed in exec")
 		}
 		prefix := []string{"--profile", o.Profile, "--json"}

@@ -23,6 +23,9 @@ func (m *Manager) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		m.servePolicy(w, r)
 		return
 	}
+	if m.serveDevtools(w, r) {
+		return
+	}
 	switch route {
 	case "/runtime/console", "/runtime/errors", "/runtime/network", "/runtime/downloads", "/runtime/dialogs", "/runtime/network-state":
 	default:

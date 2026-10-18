@@ -226,6 +226,11 @@ func (p *Page) documentID(ctx context.Context) (int, error) {
 	return r.Root.BackendNodeID, err
 }
 func (p *Page) Snapshot(ctx context.Context, interactive bool, refs *Refs) ([]SnapshotNode, error) {
+	return p.snapshot(ctx, interactive, refs, 0)
+}
+
+// snapshot limits output to the subtree of root (a backend DOM node) when set.
+func (p *Page) snapshot(ctx context.Context, interactive bool, refs *Refs, root int) ([]SnapshotNode, error) {
 	if refs == nil {
 		return nil, errors.New("refs store required")
 	}
@@ -235,8 +240,10 @@ func (p *Page) Snapshot(ctx context.Context, interactive bool, refs *Refs) ([]Sn
 	}
 	var r struct {
 		Nodes []struct {
-			Ignored       bool `json:"ignored"`
-			BackendNodeID int  `json:"backendDOMNodeId"`
+			NodeID        string `json:"nodeId"`
+			ParentID      string `json:"parentId"`
+			Ignored       bool   `json:"ignored"`
+			BackendNodeID int    `json:"backendDOMNodeId"`
 			Role          struct {
 				Value string `json:"value"`
 			} `json:"role"`
@@ -251,10 +258,32 @@ func (p *Page) Snapshot(ctx context.Context, interactive bool, refs *Refs) ([]Sn
 	if err = p.Call(ctx, "Accessibility.getFullAXTree", nil, &r); err != nil {
 		return nil, err
 	}
+	inside := map[string]bool{}
+	if root != 0 {
+		children := map[string][]string{}
+		queue := []string{}
+		for _, n := range r.Nodes {
+			children[n.ParentID] = append(children[n.ParentID], n.NodeID)
+			if n.BackendNodeID == root {
+				queue = append(queue, n.NodeID)
+			}
+		}
+		if len(queue) == 0 {
+			return nil, errors.New("element has no accessibility node")
+		}
+		for len(queue) > 0 {
+			id := queue[0]
+			queue = queue[1:]
+			if !inside[id] {
+				inside[id] = true
+				queue = append(queue, children[id]...)
+			}
+		}
+	}
 	refs.Items = map[string]Ref{}
 	out := []SnapshotNode{}
 	for _, n := range r.Nodes {
-		if n.Ignored {
+		if n.Ignored || (root != 0 && !inside[n.NodeID]) {
 			continue
 		}
 		isInteractive := strings.Contains("|button|link|textbox|searchbox|checkbox|radio|combobox|listbox|option|slider|spinbutton|switch|tab|menuitem|menuitemcheckbox|menuitemradio|treeitem|", "|"+n.Role.Value+"|")
@@ -474,6 +503,22 @@ func parseKey(raw string) (keySpec, error) {
 		k.Code = "Space"
 		k.VK = 32
 		k.Text = " "
+	case "shift", "shiftleft", "shiftright":
+		k.Key = "Shift"
+		k.Code = "ShiftLeft"
+		k.VK = 16
+	case "ctrl", "control", "controlleft", "controlright":
+		k.Key = "Control"
+		k.Code = "ControlLeft"
+		k.VK = 17
+	case "alt", "option", "altleft", "altright":
+		k.Key = "Alt"
+		k.Code = "AltLeft"
+		k.VK = 18
+	case "meta", "cmd", "command", "metaleft", "metaright":
+		k.Key = "Meta"
+		k.Code = "MetaLeft"
+		k.VK = 91
 	default:
 		if strings.HasPrefix(strings.ToLower(name), "f") {
 			n, err := strconv.Atoi(name[1:])
