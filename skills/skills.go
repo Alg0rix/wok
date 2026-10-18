@@ -105,13 +105,17 @@ func install(args []string, out io.Writer) error {
 			return fmt.Errorf("home directory: %w", err)
 		}
 	}
+	// Symlinks are refused below the anchor only: the working directory, home,
+	// or the parent of --path may legitimately live under one (macOS /var).
 	roots := []string{}
+	anchor := base
 	if specified["path"] {
 		root, err := filepath.Abs(*custom)
 		if err != nil {
 			return err
 		}
 		roots = append(roots, root)
+		anchor = filepath.Dir(root)
 	} else {
 		for _, name := range agents {
 			dir := map[string]string{"codex": ".agents", "claude": ".claude", "cursor": ".cursor"}[name]
@@ -125,7 +129,7 @@ func install(args []string, out io.Writer) error {
 		plan := targetPlan{result: installResult{Path: dir, Status: "unchanged"}}
 		for _, name := range assetNames {
 			path := filepath.Join(dir, filepath.FromSlash(name))
-			if err := checkPath(path); err != nil {
+			if err := checkPath(anchor, path); err != nil {
 				return err
 			}
 			data, err := fs.ReadFile(bundled, "wok/"+name)
@@ -159,13 +163,13 @@ func install(args []string, out io.Writer) error {
 			if !asset.write {
 				continue
 			}
-			if err := checkPath(asset.path); err != nil {
+			if err := checkPath(anchor, asset.path); err != nil {
 				return err
 			}
 			if err := os.MkdirAll(filepath.Dir(asset.path), 0755); err != nil {
 				return err
 			}
-			if err := checkPath(asset.path); err != nil {
+			if err := checkPath(anchor, asset.path); err != nil {
 				return err
 			}
 			if err := atomicWrite(asset.path, asset.data); err != nil {
@@ -177,20 +181,23 @@ func install(args []string, out io.Writer) error {
 	return json.NewEncoder(out).Encode(results)
 }
 
-// checkPath rejects symlinks anywhere in an absolute destination chain, including
-// an existing final asset. It also rejects special files and non-directory parents.
-func checkPath(path string) error {
+// checkPath rejects symlinks anywhere between anchor and path, including an
+// existing final asset. It also rejects special files and non-directory parents.
+func checkPath(anchor, path string) error {
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return err
 	}
-	volume := filepath.VolumeName(path)
-	current := volume + string(filepath.Separator)
-	parts := strings.Split(strings.TrimPrefix(path, current), string(filepath.Separator))
+	if anchor, err = filepath.Abs(anchor); err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(anchor, path)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("skill destination %s is outside %s", path, anchor)
+	}
+	current := anchor
+	parts := strings.Split(relative, string(filepath.Separator))
 	for i, part := range parts {
-		if part == "" {
-			continue
-		}
 		current = filepath.Join(current, part)
 		info, err := os.Lstat(current)
 		if errors.Is(err, os.ErrNotExist) {

@@ -223,3 +223,19 @@ func chdir(t *testing.T, dir string) {
 		}
 	})
 }
+
+// macOS temp and home directories often live below a symlink such as /var.
+func TestSymlinkedAncestorAccepted(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symbolic links unavailable:", err)
+	}
+	var out bytes.Buffer
+	if err := Run([]string{"install", "--path", filepath.Join(link, "project", "skills")}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(real, "project", "skills", "wok", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+}

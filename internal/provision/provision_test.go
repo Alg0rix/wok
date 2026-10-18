@@ -124,6 +124,9 @@ func TestConcurrentEnsureInstallsOnce(t *testing.T) {
 	}
 }
 func TestInvalidCacheRecovers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no execute permission bit to invalidate")
+	}
 	c, downloads := fixture(t, goodArchive(t))
 	executable, err := ensure(context.Background(), c)
 	if err != nil {
