@@ -322,3 +322,7 @@ WOK_BENCH_BROWSER=/absolute/path/to/chrome-headless-shell WOK_BENCH_N=20 node be
 and [raw samples](bench/results.json). They compare shell subprocesses as well as
 an already-running Playwright client. Playwright can also reuse a browser;
 its cold launch is one measured lifecycle choice, not an inherent limitation.
+
+## License
+
+[MIT](LICENSE)
