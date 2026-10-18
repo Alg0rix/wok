@@ -119,6 +119,9 @@ func runExecSource(ctx context.Context, source io.Reader, o Options, out io.Writ
 		if o.Tab != "" {
 			prefix = append(prefix, "--tab", o.Tab)
 		}
+		if o.Frame != "" {
+			prefix = append(prefix, "--frame", o.Frame)
+		}
 		if o.NoSandbox {
 			prefix = append(prefix, "--no-sandbox")
 		}

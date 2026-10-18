@@ -19,11 +19,19 @@ type Target struct {
 	Type     string `json:"type"`
 	Title    string `json:"title"`
 	URL      string `json:"url"`
+	// ParentFrameID is set for out-of-process iframe targets.
+	ParentFrameID string `json:"parentFrameId,omitempty"`
 }
 type Page struct {
 	Client    *cdp.Client
 	SessionID string
 	TargetID  string
+	// FrameID and ContextID are set when the page is scoped to a child frame;
+	// ContextID is zero for an out-of-process frame with its own session.
+	FrameID   string
+	ContextID int
+	frame     *frameScope
+	sessions  map[string]string // out-of-process frame ID -> session, on the tab page
 }
 
 func Targets(ctx context.Context, c *cdp.Client) ([]Target, error) {
@@ -61,19 +69,43 @@ func Attach(ctx context.Context, c *cdp.Client, targetID string) (*Page, error) 
 	if err := c.Call(ctx, "", "Target.attachToTarget", map[string]any{"targetId": targetID, "flatten": true}, &r); err != nil {
 		return nil, err
 	}
-	p := &Page{c, r.SessionID, targetID}
+	p := &Page{Client: c, SessionID: r.SessionID, TargetID: targetID}
 	if err := p.Call(ctx, "Page.enable", nil, nil); err != nil {
 		p.Close()
 		return nil, err
 	}
 	return p, nil
 }
+
+// Close detaches the tab session and any frame sessions; it is a no-op for a
+// frame-scoped page, whose sessions belong to the tab page.
 func (p *Page) Close() error {
+	if p.frame != nil {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	for _, s := range p.sessions {
+		_ = p.Client.Call(ctx, "", "Target.detachFromTarget", map[string]any{"sessionId": s}, nil)
+	}
 	return p.Client.Call(ctx, "", "Target.detachFromTarget", map[string]any{"sessionId": p.SessionID}, nil)
 }
+
+// Call sends a command to the page's session. For a frame-scoped page, input
+// and screenshots go to the tab, and Runtime.evaluate runs in the frame.
 func (p *Page) Call(ctx context.Context, method string, params, result any) error {
+	if p.frame != nil {
+		if strings.HasPrefix(method, "Input.") || method == "Page.captureScreenshot" {
+			return p.frame.top.Call(ctx, method, params, result)
+		}
+		if m, ok := params.(map[string]any); ok && p.ContextID != 0 && method == "Runtime.evaluate" {
+			scoped := map[string]any{"contextId": p.ContextID}
+			for k, v := range m {
+				scoped[k] = v
+			}
+			params = scoped
+		}
+	}
 	return p.Client.Call(ctx, p.SessionID, method, params, result)
 }
 
@@ -93,6 +125,7 @@ func remoteError(r remoteResult) error {
 	}
 	return nil
 }
+
 // Eval evaluates an expression and returns its JSON value. When the
 // expression is a function, such as '() => ...', Eval calls it and returns
 // the awaited result instead.
@@ -135,6 +168,7 @@ func normalizeURL(raw string) (string, error) {
 	}
 }
 func (p *Page) Navigate(ctx context.Context, raw string) error {
+	p = p.Top()
 	u, err := normalizeURL(raw)
 	if err != nil {
 		return err
@@ -219,6 +253,9 @@ type Ref struct {
 	BackendNodeID int    `json:"backendNodeId"`
 	DocumentID    int    `json:"documentId"`
 	TargetID      string `json:"targetId"`
+	// FrameID is set for elements inside an iframe; DocumentID is then the
+	// frame's document.
+	FrameID string `json:"frameId,omitempty"`
 }
 type Refs struct {
 	Next  int            `json:"next"`
@@ -233,6 +270,24 @@ type SnapshotNode struct {
 }
 
 func (p *Page) documentID(ctx context.Context) (int, error) {
+	if p.ContextID != 0 {
+		// A same-process frame shares the tab's DOM tree; ask its context.
+		var d remoteResult
+		if err := p.Call(ctx, "Runtime.evaluate", map[string]any{"expression": "document"}, &d); err != nil {
+			return 0, err
+		}
+		if err := remoteError(d); err != nil {
+			return 0, err
+		}
+		defer p.Call(ctx, "Runtime.releaseObject", map[string]any{"objectId": d.Result.ObjectID}, nil)
+		var n struct {
+			Node struct {
+				BackendNodeID int `json:"backendNodeId"`
+			} `json:"node"`
+		}
+		err := p.Call(ctx, "DOM.describeNode", map[string]any{"objectId": d.Result.ObjectID}, &n)
+		return n.Node.BackendNodeID, err
+	}
 	var r struct {
 		Root struct {
 			BackendNodeID int `json:"backendNodeId"`
@@ -246,10 +301,47 @@ func (p *Page) Snapshot(ctx context.Context, interactive bool, refs *Refs) ([]Sn
 }
 
 // snapshot limits output to the subtree of root (a backend DOM node) when set.
+// Iframe contents follow their Iframe node, with refs bound to that frame.
 func (p *Page) snapshot(ctx context.Context, interactive bool, refs *Refs, root int) ([]SnapshotNode, error) {
 	if refs == nil {
 		return nil, errors.New("refs store required")
 	}
+	refs.Items = map[string]Ref{}
+	return p.snapshotFrame(ctx, interactive, refs, root)
+}
+
+// axTree reads the accessibility tree of this page's frame.
+func (p *Page) axTree(ctx context.Context, result any) error {
+	params := map[string]any{}
+	if p.ContextID != 0 {
+		params["frameId"] = p.FrameID
+	}
+	return p.Call(ctx, "Accessibility.getFullAXTree", params, result)
+}
+
+// snapshotChild snapshots the frame owned by an Iframe node. Frames that
+// cannot be scoped yet (for example, still loading) are omitted.
+func (p *Page) snapshotChild(ctx context.Context, interactive bool, refs *Refs, owner int) []SnapshotNode {
+	var d struct {
+		Node struct {
+			FrameID string `json:"frameId"`
+		} `json:"node"`
+	}
+	if p.Call(ctx, "DOM.describeNode", map[string]any{"backendNodeId": owner}, &d) != nil || d.Node.FrameID == "" {
+		return nil
+	}
+	child, err := p.childFrame(ctx, d.Node.FrameID, owner)
+	if err != nil {
+		return nil
+	}
+	nodes, err := child.snapshotFrame(ctx, interactive, refs, 0)
+	if err != nil {
+		return nil
+	}
+	return nodes
+}
+
+func (p *Page) snapshotFrame(ctx context.Context, interactive bool, refs *Refs, root int) ([]SnapshotNode, error) {
 	doc, err := p.documentID(ctx)
 	if err != nil {
 		return nil, err
@@ -271,7 +363,7 @@ func (p *Page) snapshot(ctx context.Context, interactive bool, refs *Refs, root 
 			} `json:"value"`
 		} `json:"nodes"`
 	}
-	if err = p.Call(ctx, "Accessibility.getFullAXTree", nil, &r); err != nil {
+	if err = p.axTree(ctx, &r); err != nil {
 		return nil, err
 	}
 	inside := map[string]bool{}
@@ -296,91 +388,113 @@ func (p *Page) snapshot(ctx context.Context, interactive bool, refs *Refs, root 
 			}
 		}
 	}
-	refs.Items = map[string]Ref{}
 	out := []SnapshotNode{}
 	for _, n := range r.Nodes {
 		if n.Ignored || (root != 0 && !inside[n.NodeID]) {
 			continue
 		}
 		isInteractive := strings.Contains("|button|link|textbox|searchbox|checkbox|radio|combobox|listbox|option|slider|spinbutton|switch|tab|menuitem|menuitemcheckbox|menuitemradio|treeitem|", "|"+n.Role.Value+"|")
-		if interactive && !isInteractive {
-			continue
+		if !interactive || isInteractive {
+			sn := SnapshotNode{Role: n.Role.Value, Name: n.Name.Value, Value: n.Value.Value}
+			if n.BackendNodeID != 0 {
+				refs.Next++
+				key := fmt.Sprintf("e%d", refs.Next)
+				sn.Ref = "@" + key
+				refs.Items[key] = Ref{BackendNodeID: n.BackendNodeID, DocumentID: doc, TargetID: p.TargetID, FrameID: p.FrameID}
+			}
+			out = append(out, sn)
 		}
-		sn := SnapshotNode{Role: n.Role.Value, Name: n.Name.Value, Value: n.Value.Value}
-		if n.BackendNodeID != 0 {
-			refs.Next++
-			key := fmt.Sprintf("e%d", refs.Next)
-			sn.Ref = "@" + key
-			refs.Items[key] = Ref{n.BackendNodeID, doc, p.TargetID}
+		if n.Role.Value == "Iframe" && n.BackendNodeID != 0 {
+			out = append(out, p.snapshotChild(ctx, interactive, refs, n.BackendNodeID)...)
 		}
-		out = append(out, sn)
 	}
 	return out, nil
 }
-func (p *Page) element(ctx context.Context, selector string, refs *Refs) (string, error) {
+
+// resolve finds one element by CSS selector, @ref, or a frame chain
+// "IFRAME >> SELECTOR", and returns the frame scope that owns its object ID.
+func (p *Page) resolve(ctx context.Context, selector string, refs *Refs) (*Page, string, error) {
+	if i := strings.LastIndex(selector, FrameSeparator); i >= 0 {
+		scope, err := p.Frame(ctx, selector[:i], refs)
+		if err != nil {
+			return nil, "", err
+		}
+		return scope.resolve(ctx, strings.TrimSpace(selector[i+len(FrameSeparator):]), refs)
+	}
 	if strings.HasPrefix(selector, "@") {
 		key := strings.TrimPrefix(selector, "@")
 		if refs == nil {
-			return "", errors.New("snapshot required before using refs")
+			return nil, "", errors.New("snapshot required before using refs")
 		}
 		ref, ok := refs.Items[key]
 		if !ok {
-			return "", fmt.Errorf("unknown or stale ref %s; take a new snapshot", selector)
+			return nil, "", fmt.Errorf("unknown or stale ref %s; take a new snapshot", selector)
 		}
-		doc, err := p.documentID(ctx)
+		if ref.TargetID != p.TargetID {
+			return nil, "", errors.New("stale ref after navigation or target change; take a new snapshot")
+		}
+		// Refs are bound to their frame, independent of the current scope.
+		scope, err := p.frameByID(ctx, ref.FrameID)
 		if err != nil {
-			return "", err
+			return nil, "", fmt.Errorf("stale ref: %w", err)
 		}
-		if ref.TargetID != p.TargetID || ref.DocumentID != doc {
-			return "", errors.New("stale ref after navigation or target change; take a new snapshot")
+		doc, err := scope.documentID(ctx)
+		if err != nil {
+			return nil, "", err
+		}
+		if ref.DocumentID != doc {
+			return nil, "", errors.New("stale ref after navigation or target change; take a new snapshot")
 		}
 		var r struct {
 			Object struct {
 				ObjectID string `json:"objectId"`
 			} `json:"object"`
 		}
-		if err = p.Call(ctx, "DOM.resolveNode", map[string]any{"backendNodeId": ref.BackendNodeID}, &r); err != nil {
-			return "", fmt.Errorf("stale ref: %w", err)
+		if err = scope.Call(ctx, "DOM.resolveNode", map[string]any{"backendNodeId": ref.BackendNodeID}, &r); err != nil {
+			return nil, "", fmt.Errorf("stale ref: %w", err)
 		}
 		if r.Object.ObjectID == "" {
-			return "", errors.New("ref no longer resolves to an element")
+			return nil, "", errors.New("ref no longer resolves to an element")
 		}
-		return r.Object.ObjectID, nil
+		return scope, r.Object.ObjectID, nil
 	}
 	var r remoteResult
 	expr := `(()=>{const nodes=document.querySelectorAll(` + quote(selector) + `);if(nodes.length!==1)throw new Error('selector matched '+nodes.length+' elements; require exactly one');return nodes[0]})()`
 	if err := p.Call(ctx, "Runtime.evaluate", map[string]any{"expression": expr}, &r); err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if err := remoteError(r); err != nil {
-		return "", err
+		return nil, "", err
 	}
-	return r.Result.ObjectID, nil
+	return p, r.Result.ObjectID, nil
 }
 func (p *Page) onElement(ctx context.Context, selector string, refs *Refs, fn string) (any, error) {
-	id, err := p.element(ctx, selector, refs)
+	v, _, err := p.onElementIn(ctx, selector, refs, fn)
+	return v, err
+}
+
+// onElementIn runs fn with the element as this and also returns the frame
+// scope that contains the element, for converting coordinates.
+func (p *Page) onElementIn(ctx context.Context, selector string, refs *Refs, fn string) (any, *Page, error) {
+	q, id, err := p.resolve(ctx, selector, refs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer p.Call(ctx, "Runtime.releaseObject", map[string]any{"objectId": id}, nil)
+	defer q.Call(ctx, "Runtime.releaseObject", map[string]any{"objectId": id}, nil)
 	var r remoteResult
-	err = p.Call(ctx, "Runtime.callFunctionOn", map[string]any{"objectId": id, "functionDeclaration": `function(){if(!this.isConnected)throw new Error('stale ref: element removed');` + fn + `}`, "returnByValue": true, "awaitPromise": true}, &r)
+	err = q.Call(ctx, "Runtime.callFunctionOn", map[string]any{"objectId": id, "functionDeclaration": `function(){if(!this.isConnected)throw new Error('stale ref: element removed');` + fn + `}`, "returnByValue": true, "awaitPromise": true}, &r)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return r.Result.Value, remoteError(r)
+	return r.Result.Value, q, remoteError(r)
 }
 func (p *Page) Click(ctx context.Context, selector string, refs *Refs) error {
-	v, err := p.onElement(ctx, selector, refs, `if(this.matches(':disabled')||this.getAttribute('aria-disabled')==='true')throw new Error('element is disabled');this.scrollIntoView({block:'center',inline:'center'});const r=this.getBoundingClientRect();const cx=(Math.max(0,r.left)+Math.min(r.right,innerWidth))/2,cy=(Math.max(0,r.top)+Math.min(r.bottom,innerHeight))/2;if(r.width<=0||r.height<=0||cx<0||cy<0||cx>=innerWidth||cy>=innerHeight)throw new Error('element is not visible');const hit=document.elementFromPoint(cx,cy);if(!hit||!(hit===this||this.contains(hit)))throw new Error('element is obscured');return {x:cx,y:cy};`)
+	point, err := p.ElementPoint(ctx, selector, refs, true)
 	if err != nil {
 		return err
 	}
-	point, ok := v.(map[string]any)
-	if !ok {
-		return errors.New("missing click coordinates")
-	}
 	for _, typ := range []string{"mouseMoved", "mousePressed", "mouseReleased"} {
-		params := map[string]any{"type": typ, "x": point["x"], "y": point["y"]}
+		params := map[string]any{"type": typ, "x": point.X, "y": point.Y}
 		if typ != "mouseMoved" {
 			params["button"] = "left"
 			params["clickCount"] = 1

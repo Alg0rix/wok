@@ -52,7 +52,7 @@ func (p *Page) Find(ctx context.Context, kind, value string, nth int, refs *Refs
 			} `json:"value"`
 		} `json:"nodes"`
 	}
-	if err = p.Call(ctx, "Accessibility.getFullAXTree", nil, &ax); err != nil {
+	if err = p.axTree(ctx, &ax); err != nil {
 		return nil, err
 	}
 	metadata := map[int]SnapshotNode{}
@@ -173,7 +173,7 @@ func (p *Page) Find(ctx context.Context, kind, value string, nth int, refs *Refs
 		refs.Items = map[string]Ref{}
 	}
 	for key, ref := range refs.Items {
-		if ref.DocumentID != doc || ref.TargetID != p.TargetID {
+		if ref.TargetID != p.TargetID || (ref.FrameID == p.FrameID && ref.DocumentID != doc) {
 			delete(refs.Items, key)
 		}
 	}
@@ -183,7 +183,7 @@ func (p *Page) Find(ctx context.Context, kind, value string, nth int, refs *Refs
 		key := fmt.Sprintf("e%d", refs.Next)
 		sn := match.node
 		sn.Ref = "@" + key
-		refs.Items[key] = Ref{BackendNodeID: match.backendID, DocumentID: doc, TargetID: p.TargetID}
+		refs.Items[key] = Ref{BackendNodeID: match.backendID, DocumentID: doc, TargetID: p.TargetID, FrameID: p.FrameID}
 		out = append(out, sn)
 	}
 	return out, nil
@@ -326,6 +326,12 @@ func (p *Page) Wait(ctx context.Context, options WaitOptions) error {
 	if options.Selector == "" && options.State != "" {
 		return errors.New("wait state requires a selector")
 	}
+	// "IFRAME >> SELECTOR" waits inside the frame; a missing frame counts as
+	// a missing element.
+	frame, selector := "", options.Selector
+	if i := strings.LastIndex(selector, FrameSeparator); i >= 0 {
+		frame, selector = selector[:i], strings.TrimSpace(selector[i+len(FrameSeparator):])
+	}
 	var expression string
 	switch {
 	case options.Selector != "":
@@ -333,7 +339,7 @@ func (p *Page) Wait(ctx context.Context, options WaitOptions) error {
 		if state == "" {
 			state = "attached"
 		}
-		start := `(()=>{const el=document.querySelector(` + quote(options.Selector) + `);`
+		start := `(()=>{const el=document.querySelector(` + quote(selector) + `);`
 		visible := `const visible=el?(()=>{const s=getComputedStyle(el),r=el.getBoundingClientRect();return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.visibility!=='collapse'&&s.display!=='none'})():false;`
 		switch state {
 		case "attached":
@@ -362,8 +368,14 @@ func (p *Page) Wait(ctx context.Context, options WaitOptions) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		value, err := p.Eval(ctx, expression)
+		var value any
+		scope, err := p, error(nil)
+		if frame != "" {
+			scope, err = p.Frame(ctx, frame, nil)
+		}
 		if err != nil {
+			value = options.State == "detached" || options.State == "hidden"
+		} else if value, err = scope.Eval(ctx, expression); err != nil {
 			return err
 		}
 		if value == true {
@@ -397,7 +409,7 @@ func (p *Page) Upload(ctx context.Context, selector string, files []string, refs
 		}
 		absolute[i] = path
 	}
-	id, err := p.element(ctx, selector, refs)
+	p, id, err := p.resolve(ctx, selector, refs)
 	if err != nil {
 		return err
 	}
