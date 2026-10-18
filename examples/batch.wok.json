@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "profile": "research",
+  "steps": [
+    { "open": "${PAGE_URL}" },
+    { "snapshot": { "interactive": true } },
+    { "get": { "kind": "title" } },
+    { "get": { "kind": "text" } }
+  ]
+}

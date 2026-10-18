@@ -1,0 +1,235 @@
+package flow
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+type part struct {
+	text     string
+	variable bool
+}
+type template []part
+
+var variableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*$`)
+
+type variables struct {
+	values  map[string]string
+	secrets map[string]bool
+}
+
+func newVariables(initial map[string]string) *variables {
+	v := &variables{values: map[string]string{}, secrets: map[string]bool{}}
+	for k, val := range initial {
+		v.values[k] = val
+		if val != "" {
+			v.secrets[val] = true
+		}
+	}
+	return v
+}
+func (v *variables) lookup(name string) (string, bool) {
+	if val, ok := v.values[name]; ok {
+		return val, true
+	}
+	if val, ok := os.LookupEnv(name); ok {
+		v.values[name] = val
+		if val != "" {
+			v.secrets[val] = true
+		}
+		return val, true
+	}
+	return "", false
+}
+func (v *variables) compile(s string, saved map[string]bool) (template, error) {
+	out := template{}
+	for {
+		before, after, found := strings.Cut(s, "${")
+		if !found {
+			out = append(out, part{text: s})
+			break
+		}
+		out = append(out, part{text: before})
+		name, rest, closed := strings.Cut(after, "}")
+		if !closed || !variableName.MatchString(name) {
+			return nil, errors.New("invalid ${NAME} variable reference")
+		}
+		prefix, _, _ := strings.Cut(name, ".")
+		if saved[prefix] {
+			out = append(out, part{text: name, variable: true})
+		} else if value, ok := v.lookup(name); ok {
+			out = append(out, part{text: value})
+		} else {
+			return nil, fmt.Errorf("missing variable %s", name)
+		}
+		s = rest
+	}
+	return out, nil
+}
+func (v *variables) compileValue(value any, saved map[string]bool) (any, error) {
+	switch x := value.(type) {
+	case string:
+		return v.compile(x, saved)
+	case []any:
+		out := make([]any, len(x))
+		for i, item := range x {
+			compiled, err := v.compileValue(item, saved)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = compiled
+		}
+		return out, nil
+	case map[string]any:
+		out := map[string]any{}
+		for k, item := range x {
+			compiled, err := v.compileValue(item, saved)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", k, err)
+			}
+			out[k] = compiled
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
+}
+func (v *variables) resolve(value any) (any, error) {
+	switch x := value.(type) {
+	case template:
+		var out strings.Builder
+		for _, p := range x {
+			if !p.variable {
+				out.WriteString(p.text)
+				continue
+			}
+			val, ok := v.values[p.text]
+			if !ok {
+				return nil, fmt.Errorf("saved variable %s has no scalar value", p.text)
+			}
+			out.WriteString(val)
+		}
+		return out.String(), nil
+	case []any:
+		out := make([]any, len(x))
+		for i, item := range x {
+			resolved, err := v.resolve(item)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = resolved
+		}
+		return out, nil
+	case map[string]any:
+		out := map[string]any{}
+		for k, item := range x {
+			resolved, err := v.resolve(item)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = resolved
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
+}
+func hasDynamic(value any) bool {
+	switch x := value.(type) {
+	case template:
+		for _, p := range x {
+			if p.variable {
+				return true
+			}
+		}
+	case []any:
+		for _, v := range x {
+			if hasDynamic(v) {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, v := range x {
+			if hasDynamic(v) {
+				return true
+			}
+		}
+	}
+	return false
+}
+func (v *variables) capture(name string, raw json.RawMessage) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return fmt.Errorf("cannot save result: %w", err)
+	}
+	for k := range v.values {
+		if k == name || strings.HasPrefix(k, name+".") {
+			delete(v.values, k)
+		}
+	}
+	return v.flatten(name, value)
+}
+func (v *variables) flatten(name string, value any) error {
+	switch x := value.(type) {
+	case map[string]any:
+		for k, item := range x {
+			if err := v.flatten(name+"."+k, item); err != nil {
+				return err
+			}
+		}
+		return nil
+	case []any:
+		return errors.New("cannot save an array as a scalar variable")
+	default:
+		var s string
+		if text, ok := value.(string); ok {
+			s = text
+		} else {
+			data, err := json.Marshal(value)
+			if err != nil {
+				return err
+			}
+			s = string(data)
+		}
+		v.values[name] = s
+		if s != "" {
+			v.secrets[s] = true
+		}
+		return nil
+	}
+}
+
+type redactedError struct {
+	message  string
+	original error
+}
+
+func (e redactedError) Error() string { return e.message }
+func (e redactedError) Unwrap() error { return e.original }
+func (v *variables) redact(err error) error {
+	if err == nil {
+		return nil
+	}
+	secrets := make([]string, 0, len(v.secrets))
+	for secret := range v.secrets {
+		secrets = append(secrets, secret)
+	}
+	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
+	replacements := make([]string, 0, len(secrets)*2)
+	for _, secret := range secrets {
+		replacements = append(replacements, secret, "[redacted]")
+	}
+	message := strings.NewReplacer(replacements...).Replace(err.Error())
+	if message == err.Error() {
+		return err
+	}
+	return redactedError{message, err}
+}

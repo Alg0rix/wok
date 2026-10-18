@@ -1,0 +1,4 @@
+/bin/
+/bench/node_modules/
+/.wok/
+*.test

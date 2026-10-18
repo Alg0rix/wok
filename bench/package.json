@@ -1,0 +1,7 @@
+{
+  "name": "wok-benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": { "benchmark": "node benchmark.mjs" },
+  "devDependencies": { "playwright-core": "1.64.1" }
+}

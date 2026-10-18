@@ -1,0 +1,18 @@
+version: 1
+profile: e2e
+viewport:
+  width: 390
+  height: 844
+  mobile: true
+  dpr: 3
+
+steps:
+  - open: "${APP_URL}/login"
+  - fill:
+      selector: "#email"
+      value: "${TEST_EMAIL}"
+  - click: "#submit"
+  - expect:
+      selector: "#success"
+      text: "Berhasil"
+  - screenshot: "login-success.png"
