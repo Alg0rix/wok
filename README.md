@@ -250,7 +250,7 @@ kill-all
 
 Global options
 --help [command]            --json                      --raw
---version
+--version                   --frame <iframe>
 ```
 
 Refs refer to backend DOM nodes and the document/target that produced them.
@@ -259,6 +259,20 @@ snapshot. Ref numbers increase across snapshots rather than silently reassigning
 an old ref. Use CSS selectors for stable automation; ambiguous selectors fail.
 Clicks scroll into view and reject disabled/covered elements before dispatching
 pointer input. `fill` sends real input events, including for an empty value.
+
+Iframes work in every element command, same-origin and cross-origin alike.
+`snapshot` lists each frame's content after its `Iframe` node, and those refs
+act inside the frame. For CSS, chain the iframe and the element with ` >> `, or
+scope a whole command, including `eval`, with `--frame`:
+
+```sh
+wok click '#checkout >> button[type=submit]'
+wok get text 'iframe[name=outer] >> #inner >> h1'   # nested frames
+wok --frame '#checkout' eval 'location.href'
+wok --frame '#checkout' snapshot -i
+```
+
+Navigation (`open`, `back`, `reload`) and tab commands always act on the tab.
 
 See [docs/agents.md](docs/agents.md) and [skills/wok/references/commands.md](skills/wok/references/commands.md) for the complete reference of every command and option.
 

@@ -63,6 +63,19 @@ an arbitrary navigation or application update. Wait for a concrete postcondition
 such as a selector, then inspect the result. `wait --selector` tests existence,
 not visibility or network idleness.
 
+Elements inside iframes, including cross-origin ones, appear in the snapshot
+right after their `Iframe` node; use those refs directly. With CSS, chain the
+iframe and the element with ` >> ` (`'#payment >> input[name=card]'`, nested:
+`'#outer >> #inner >> button'`). This works in `click`, `fill`, `get`, `wait`,
+`upload`, `screenshot`, flows, and every other element command. To scope a
+whole command, including `eval` and `snapshot`, pass `--frame IFRAME`, where
+IFRAME is a CSS selector, a ref, or a ` >> ` chain:
+
+```sh
+wok --profile research --frame '#payment' eval 'document.title'
+wok --profile research --frame '#payment' snapshot -i
+```
+
 `fill` replaces editable contents and emits normal input events. `type` inserts
 into the currently focused field. Use `press Enter`, `press Tab`, or a modifier
 combination such as `Control+a` or `Meta+a`. Human activity in the live viewer
@@ -282,7 +295,7 @@ profile running unless the task requests its closure.
 
 ## Limits and protocol escape hatch
 
-CSS/ref element actions target the main document. The snapshot is a flat accessibility listing (`snapshot [target]` scopes to a subtree). Use a full browser screenshot when a task depends on appearance.
+CSS element actions target the main document unless chained into a frame with ` >> ` or scoped with `--frame`; navigation and tab commands always act on the tab. Flow `expect` selectors and `wait --text`/`--fn` read the main document only (use `--frame` for the CLI forms). The snapshot is a flat accessibility listing (`snapshot [target]` scopes to a subtree). Use a full browser screenshot when a task depends on appearance.
 
 For a supported CDP operation that has no convenience command:
 

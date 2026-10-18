@@ -27,7 +27,7 @@ func (p *Page) ElementPoint(ctx context.Context, selector string, refs *Refs, re
 	if requireEnabled {
 		script = enabledScript + script
 	}
-	v, err := p.onElement(ctx, selector, refs, script)
+	v, scope, err := p.onElementIn(ctx, selector, refs, script)
 	if err != nil {
 		return Point{}, err
 	}
@@ -36,7 +36,7 @@ func (p *Page) ElementPoint(ctx context.Context, selector string, refs *Refs, re
 	if err = json.Unmarshal(b, &point); err != nil {
 		return Point{}, errors.New("missing element coordinates")
 	}
-	return point, nil
+	return scope.toTab(ctx, point)
 }
 
 // MouseButton validates a CDP mouse button name.
@@ -147,7 +147,7 @@ wait:
 	for {
 		select {
 		case ev := <-events:
-			if ev.SessionID != p.SessionID {
+			if ev.SessionID != p.Top().SessionID {
 				continue
 			}
 			var e struct {
@@ -250,7 +250,7 @@ func (p *Page) EvalOn(ctx context.Context, selector, function string, refs *Refs
 
 // SnapshotOf returns the accessibility subtree rooted at an element.
 func (p *Page) SnapshotOf(ctx context.Context, selector string, interactive bool, refs *Refs) ([]SnapshotNode, error) {
-	id, err := p.element(ctx, selector, refs)
+	scope, id, err := p.resolve(ctx, selector, refs)
 	if err != nil {
 		return nil, err
 	}
@@ -259,16 +259,17 @@ func (p *Page) SnapshotOf(ctx context.Context, selector string, interactive bool
 			BackendNodeID int `json:"backendNodeId"`
 		} `json:"node"`
 	}
-	err = p.Call(ctx, "DOM.describeNode", map[string]any{"objectId": id}, &described)
-	_ = p.Call(ctx, "Runtime.releaseObject", map[string]any{"objectId": id}, nil)
+	err = scope.Call(ctx, "DOM.describeNode", map[string]any{"objectId": id}, &described)
+	_ = scope.Call(ctx, "Runtime.releaseObject", map[string]any{"objectId": id}, nil)
 	if err != nil {
 		return nil, err
 	}
-	return p.snapshot(ctx, interactive, refs, described.Node.BackendNodeID)
+	return scope.snapshot(ctx, interactive, refs, described.Node.BackendNodeID)
 }
 
 // History moves through session history by delta (-1 back, 1 forward).
 func (p *Page) History(ctx context.Context, delta int) error {
+	p = p.Top()
 	var h struct {
 		CurrentIndex int `json:"currentIndex"`
 		Entries      []struct {
@@ -292,6 +293,7 @@ func (p *Page) History(ctx context.Context, delta int) error {
 
 // Reload reloads the page and waits for its load event.
 func (p *Page) Reload(ctx context.Context) error {
+	p = p.Top()
 	return p.waitLoad(ctx, func() error { return p.Call(ctx, "Page.reload", nil, nil) })
 }
 
@@ -351,12 +353,28 @@ func (p *Page) PDF(ctx context.Context) ([]byte, error) {
 
 // ElementScreenshot captures an element's bounding box as PNG.
 func (p *Page) ElementScreenshot(ctx context.Context, selector string, refs *Refs) ([]byte, error) {
-	v, err := p.onElement(ctx, selector, refs, `this.scrollIntoView({block:'center',inline:'center'});const r=this.getBoundingClientRect();if(r.width<=0||r.height<=0)throw new Error('element is not visible');return {x:r.left+scrollX,y:r.top+scrollY,width:r.width,height:r.height};`)
+	v, scope, err := p.onElementIn(ctx, selector, refs, `this.scrollIntoView({block:'center',inline:'center'});const r=this.getBoundingClientRect();if(r.width<=0||r.height<=0)throw new Error('element is not visible');return {x:r.left,y:r.top,width:r.width,height:r.height};`)
 	if err != nil {
 		return nil, err
 	}
 	clip, _ := v.(map[string]any)
-	clip["scale"] = 1
+	x, _ := clip["x"].(float64)
+	y, _ := clip["y"].(float64)
+	// The clip is in tab document coordinates: frame offset plus tab scroll.
+	at, err := scope.toTab(ctx, Point{x, y})
+	if err != nil {
+		return nil, err
+	}
+	var scroll remoteResult
+	if err = p.Top().Call(ctx, "Runtime.evaluate", map[string]any{"expression": "[scrollX,scrollY]", "returnByValue": true}, &scroll); err != nil {
+		return nil, err
+	}
+	if xy, ok := scroll.Result.Value.([]any); ok && len(xy) == 2 {
+		sx, _ := xy[0].(float64)
+		sy, _ := xy[1].(float64)
+		at = Point{at.X + sx, at.Y + sy}
+	}
+	clip["x"], clip["y"], clip["scale"] = at.X, at.Y, 1
 	var r struct {
 		Data string `json:"data"`
 	}

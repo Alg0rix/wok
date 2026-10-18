@@ -86,6 +86,8 @@ Options (before or after command; -- ends option parsing):
   -s, --session, --profile NAME  Isolated persistent profile (default: default)
   --cdp URL                Attach external HTTP or WebSocket CDP browser
   --tab ID                 Select a target for this invocation
+  --frame SELECTOR         Run element commands and eval inside an iframe
+                           (CSS or @ref; nest with "outer >> inner")
   --timeout DURATION       Total timeout (15s; start/browser install/run: 5m)
   --browser PATH           Browser executable (start only; overrides auto-install)
   --headed                 Show browser window (start only)
@@ -115,7 +117,7 @@ type Options struct {
 	EmbedOrigins                                                   []string
 	ProfileSet                                                     bool
 	TimeoutSet                                                     bool
-	Profile, Endpoint, Tab, Browser                                string
+	Profile, Endpoint, Tab, Browser, Frame                         string
 	Timeout                                                        time.Duration
 	Headed, NoSandbox, NoRender, JSON, CloseExternal, BrowserLevel bool
 	Raw                                                            bool
@@ -132,7 +134,7 @@ func Parse(args []string) (Options, []string, error) {
 		}
 		key, value, has := strings.Cut(a, "=")
 		switch key {
-		case "-s", "--session", "--profile", "--cdp", "--tab", "--timeout", "--browser", "--listen", "--port", "--auth-token", "--embed-origin", "--download-dir", "--proxy", "--proxy-bypass":
+		case "-s", "--session", "--profile", "--cdp", "--tab", "--frame", "--timeout", "--browser", "--listen", "--port", "--auth-token", "--embed-origin", "--download-dir", "--proxy", "--proxy-bypass":
 			if !has {
 				i++
 				if i >= len(args) {
@@ -167,6 +169,8 @@ func Parse(args []string) (Options, []string, error) {
 				o.Profile = value
 			case "--cdp":
 				o.Endpoint = value
+			case "--frame":
+				o.Frame = value
 			case "--tab":
 				o.Tab = value
 			case "--browser":
@@ -609,6 +613,12 @@ func run(parent context.Context, args []string, out io.Writer) error {
 	if len(state.Refs) > 0 {
 		if err = json.Unmarshal(state.Refs, &refs); err != nil {
 			return fmt.Errorf("corrupt refs: %w", err)
+		}
+	}
+	if o.Frame != "" {
+		// Scope page commands to the iframe; navigation and input stay on the tab.
+		if p, err = p.Frame(ctx, o.Frame, &refs); err != nil {
+			return err
 		}
 	}
 	var result any = map[string]bool{"ok": true}

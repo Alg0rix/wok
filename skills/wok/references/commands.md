@@ -29,7 +29,7 @@ wok close-all
 
 ## 2. Core Page & Element Actions
 
-`TARGET` accepts a persistent snapshot reference (`@eN`) or a CSS selector matching one element in the main document.
+`TARGET` accepts a persistent snapshot reference (`@eN`) or a CSS selector matching one element in the main document. Snapshots include iframe contents (same- and cross-origin) after each `Iframe` node, and their refs act inside the frame. To reach into an iframe with CSS, chain selectors with ` >> `: `wok click '#payment >> button'` (nested: `'#outer >> #inner >> button'`). Chains work in every element command, `wait`, and flows.
 
 | Command | Description |
 |---|---|
@@ -166,6 +166,7 @@ wok close-all
 | `wok install-browser [chromium]` / `wok browser install` | Download or reuse the cached Chromium headless shell binary. |
 | `-s=<name>`, `--session <name>`, `--profile <name>` | Select the isolated browser profile (default: `default`). |
 | `--tab <id>` | Target a specific tab ID for this command without changing the profile's selected tab. |
+| `--frame <iframe>` | Scope element commands, `eval`, `snapshot`, `find`, and `wait` to the document inside an iframe (CSS selector, `@ref`, or ` >> ` chain for nested frames). Navigation and tab commands still act on the tab. |
 | `--cdp <url>` | Operate against an external HTTP or WebSocket CDP endpoint. |
 | `--timeout <duration>` | Bound total command execution time (e.g. `500ms`, `30s`; default `15s`, or `5m` for `start`/`install-browser`/`run`). |
 | `--json` | Emit JSON for `snapshot` (all other non-terminal commands emit JSON by default). |
