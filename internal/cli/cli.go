@@ -55,7 +55,7 @@ Browser:
   find role|text|css VALUE [--nth N]
   cookies [list|set|delete|clear] [ARGS]
   storage local|session [list|get|set|delete|clear] [ARGS]
-  upload TARGET FILE...    Fill a file input
+  upload TARGET FILE...    Fill a file input or answer the chooser TARGET opens
   console|errors|network   Read recorded page events
   downloads|dialogs        Read browser downloads/dialog history
   dialog [accept|dismiss [TEXT]]  Policy for future confirm/prompt dialogs

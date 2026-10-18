@@ -106,6 +106,7 @@ func validateFlowAction(action string, value any) (bool, error) {
 
 type runner struct {
 	vars        *variables
+	dir         string
 	report      *Report
 	failedIndex *int
 	exec        func(context.Context, []string, time.Duration) (json.RawMessage, error)
@@ -182,7 +183,7 @@ func (r *runner) step(ctx context.Context, s *step, index int, label string) (js
 		result, e = assert(stepCtx, value.(map[string]any), func(c context.Context, args []string) (json.RawMessage, error) { return r.exec(c, args, timeout) })
 	} else {
 		var args []string
-		if args, e = actionArgs(s.action, value); e == nil {
+		if args, e = actionArgs(s.action, inFlowDir(s.action, value, r.dir)); e == nil {
 			result, e = r.exec(stepCtx, args, timeout)
 		}
 	}

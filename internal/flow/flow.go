@@ -22,6 +22,9 @@ type Options struct {
 	ArtifactDir string
 	// NoRedact keeps variable and captured values in errors.
 	NoRedact bool
+	// Dir resolves relative files that steps read, normally the flow file's
+	// directory. Empty means the working directory.
+	Dir string
 }
 type StepReport struct {
 	Index      int             `json:"index"`
@@ -156,7 +159,7 @@ func Run(ctx context.Context, source []byte, opts Options, exec Executor) (repor
 			return fail(fmt.Errorf("set viewport: %w", err))
 		}
 	}
-	r := &runner{vars: vars, report: &report, failedIndex: &failedIndex, exec: func(c context.Context, args []string, timeout time.Duration) (json.RawMessage, error) {
+	r := &runner{vars: vars, dir: opts.Dir, report: &report, failedIndex: &failedIndex, exec: func(c context.Context, args []string, timeout time.Duration) (json.RawMessage, error) {
 		return exec(c, route(args, timeout))
 	}}
 	if err = r.run(ctx, doc.steps, 0, ""); err != nil {
@@ -195,6 +198,9 @@ func validateAction(action string, value any) error {
 		return err
 	}
 	if handled, err := validateFlowAction(action, value); handled {
+		return err
+	}
+	if handled, err := validateElementAction(action, value); handled {
 		return err
 	}
 	switch action {
@@ -253,6 +259,9 @@ func actionArgs(action string, value any) ([]string, error) {
 		return args, nil
 	}
 	if args, ok := networkArgs(action, value); ok {
+		return args, nil
+	}
+	if args, ok := elementArgs(action, value); ok {
 		return args, nil
 	}
 	switch action {

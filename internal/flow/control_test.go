@@ -466,3 +466,56 @@ func TestRedactionOptOut(t *testing.T) {
 		t.Fatalf("invalid redact err=%v", err)
 	}
 }
+
+func TestElementActionsAndFlowDirFiles(t *testing.T) {
+	s := &stub{run: func(context.Context, []string) (json.RawMessage, error) { return json.RawMessage(`true`), nil }}
+	report, err := Run(context.Background(), []byte(`steps:
+  - dblclick: "#row"
+  - hover: "#menu"
+  - check: "#agree"
+  - uncheck: "#news"
+  - select: {selector: "#size", value: m}
+  - select: {selector: "#tags", values: [a, b]}
+  - drag: {from: "#card", to: "#done"}
+  - drop: {selector: "#zone", files: [a.png, /abs/b.png]}
+  - drop: {selector: "#zone", text: hello}
+  - keydown: Shift
+  - keyup: Shift
+  - go-back: true
+  - go-forward: true
+  - reload: true
+  - pdf: out.pdf
+  - state-save: state.json
+  - state-load: state.json
+  - upload: {selector: "#pick", files: [fixtures/cv.pdf]}
+  - route: {pattern: "**/api/**", bodyFile: mocks/api.json}
+`), Options{Dir: "/flows"}, s.exec)
+	if err != nil || !report.OK {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	want := [][]string{
+		{"dblclick", "#row"}, {"hover", "#menu"}, {"check", "#agree"}, {"uncheck", "#news"},
+		{"select", "#size", "m"}, {"select", "#tags", "a", "b"}, {"drag", "#card", "#done"},
+		{"drop", "#zone", "/flows/a.png", "/abs/b.png"}, {"drop", "#zone", "--text", "hello"},
+		{"keydown", "Shift"}, {"keyup", "Shift"}, {"go-back"}, {"go-forward"}, {"reload"},
+		{"pdf", "out.pdf"}, {"state-save", "state.json"}, {"state-load", "/flows/state.json"},
+		{"upload", "#pick", "/flows/fixtures/cv.pdf"}, {"route", "**/api/**", "--body-file", "/flows/mocks/api.json"},
+	}
+	commands := s.commands()[1:] // after start
+	if len(commands) != len(want) {
+		t.Fatalf("commands=%q", commands)
+	}
+	for i, w := range want {
+		if !reflect.DeepEqual(commands[i], w) {
+			t.Errorf("step %d: got %q, want %q", i+1, commands[i], w)
+		}
+	}
+	for _, bad := range []string{
+		`select: {selector: "#s"}`, `select: {selector: "#s", value: a, values: [b]}`,
+		`drop: {selector: "#z"}`, `drag: {from: "#a"}`, `reload: false`, `hover: ""`,
+	} {
+		if _, err := Run(context.Background(), []byte("steps: [{"+bad+"}]"), Options{}, (&stub{}).exec); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

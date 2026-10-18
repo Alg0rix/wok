@@ -15,12 +15,12 @@ import (
 	"strings"
 )
 
-//go:embed wok/SKILL.md wok/references/commands.md
+//go:embed wok/SKILL.md wok/references/commands.md wok/references/flows.md
 var bundled embed.FS
 
 const description = "Browse and interact with websites using Wok's persistent CDP browser CLI."
 
-var assetNames = []string{"SKILL.md", "references/commands.md"}
+var assetNames = []string{"SKILL.md", "references/commands.md", "references/flows.md"}
 
 // Run handles the arguments following `wok skills`.
 func Run(args []string, out io.Writer) error {

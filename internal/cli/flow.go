@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/alg0rix/wok/internal/flow"
@@ -63,6 +64,9 @@ func runFlow(ctx context.Context, args []string, o Options, out io.Writer) error
 		profile = o.Profile
 	}
 	options := flow.Options{Profile: profile, Endpoint: o.Endpoint, TargetID: o.Tab, Vars: vars, ArtifactDir: *artifacts, NoRedact: *noRedact}
+	if file != "-" {
+		options.Dir = filepath.Dir(file)
+	}
 	execute := func(stepCtx context.Context, command []string) (json.RawMessage, error) {
 		// Reuse CLI behavior in process. The command still takes its profile lock,
 		// attaches via CDP and detaches, but does not start another Wok process.

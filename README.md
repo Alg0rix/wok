@@ -307,10 +307,12 @@ wok run examples/batch.wok.json --var PAGE_URL=https://example.com
 
 YAML/JSON flows execute browser actions in process. Add `expect` steps for E2E
 assertions, or omit assertions for an agent batch. Flows can branch (`if`),
-loop (`repeat`, `each`), and mock the network (`route` with per-request `times`). The runner emits JSON results,
+loop (`repeat`, `each`), mock the network (`route` with per-request `times`),
+and use the element, upload, storage, and navigation commands of the CLI.
+Fixture files resolve next to the flow file. The runner emits JSON results,
 returns a failing exit code on errors, and captures a failure screenshot.
-See [the DSL reference](docs/flows.md) for variables, captured results, tabs,
-timeouts, assertions, and cleanup behavior.
+See [the DSL reference](docs/flows.md) for every action, variables, captured
+results, tabs, timeouts, assertions, and cleanup behavior.
 
 ## Attach an existing browser
 

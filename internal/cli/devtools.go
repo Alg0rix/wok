@@ -782,7 +782,7 @@ var helpSummaries = map[string]string{
 	"drop":                  "wok drop TARGET FILE... | wok drop TARGET --text TEXT — Drop files or text onto an element",
 	"hover":                 "wok hover TARGET — Move pointer over an element",
 	"select":                "wok select TARGET VALUE... — Select <select> option(s) by value or label",
-	"upload":                "wok upload TARGET FILE... — Set files on an <input type=file>",
+	"upload":                "wok upload TARGET FILE... — Set files on a file input, or click TARGET and answer its file chooser",
 	"check":                 "wok check TARGET — Check a checkbox or radio button",
 	"uncheck":               "wok uncheck TARGET — Uncheck a checkbox",
 	"snapshot":              "wok snapshot [-i] [TARGET] — Accessibility tree with persistent @eN refs",

@@ -202,6 +202,10 @@ func parse(source []byte) (document, error) {
 	}
 	return doc, nil
 }
+
+// stepActions lists every action a step may hold.
+var stepActions = []string{"open", "click", "fill", "type", "press", "eval", "get", "wait", "screenshot", "snapshot", "tab", "expect", "find", "cookies", "storage", "upload", "console", "errors", "network", "downloads", "dialogs", "dialog", "set", "if", "repeat", "each", "route", "unroute", "request", "dblclick", "hover", "check", "uncheck", "select", "drag", "drop", "keydown", "keyup", "go-back", "go-forward", "reload", "pdf", "state-save", "state-load"}
+
 func parseStep(n *yaml.Node) (step, error) {
 	count := 0
 	return parseStepDepth(n, 0, &count)
@@ -213,7 +217,7 @@ func parseStepDepth(n *yaml.Node, depth int, count *int) (step, error) {
 	if *count++; *count > 1000 {
 		return s, errors.New("flows may contain at most 1000 steps including nested steps")
 	}
-	f, err := fields(n, "name", "timeout", "save", "open", "click", "fill", "type", "press", "eval", "get", "wait", "screenshot", "snapshot", "tab", "expect", "find", "cookies", "storage", "upload", "console", "errors", "network", "downloads", "dialogs", "dialog", "set", "if", "then", "else", "repeat", "each", "route", "unroute", "request")
+	f, err := fields(n, append([]string{"name", "timeout", "save", "then", "else"}, stepActions...)...)
 	if err != nil {
 		return s, err
 	}
@@ -311,6 +315,8 @@ func parseStepDepth(n *yaml.Node, depth int, count *int) (step, error) {
 		s.value, err = parseNetworkStep(s.action, payload)
 	case "wait", "find", "cookies", "storage", "upload", "console", "errors", "network", "downloads", "dialogs", "dialog", "set":
 		s.value, err = parseNative(s.action, payload)
+	default:
+		s.value, err = parseElementAction(s.action, payload)
 	}
 	if err != nil {
 		return s, fmt.Errorf("%s: %w", s.action, err)

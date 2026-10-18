@@ -321,3 +321,54 @@ func extraBrowserPage(t *testing.T, executable string) (*Page, context.Context) 
 	t.Cleanup(func() { page.Close() })
 	return page, ctx
 }
+
+func TestRealBrowserUploadFileChooser(t *testing.T) {
+	executable := os.Getenv("WOK_TEST_BROWSER")
+	if executable == "" {
+		t.Skip("set WOK_TEST_BROWSER for browser integration")
+	}
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!doctype html><body><button id="pick">Pick</button><button id="one">One</button><p id="plain">text</p><input id="hidden" type="file" style="display:none"><script>
+const picker=(multiple)=>()=>{const i=document.createElement('input');i.type='file';i.multiple=multiple;i.onchange=()=>{window.picked=[...i.files].map(f=>f.name)};i.click()};
+document.querySelector('#pick').onclick=picker(true);document.querySelector('#one').onclick=picker(false);</script>`))
+	}))
+	defer fixture.Close()
+	page, ctx := extraBrowserPage(t, executable)
+	if err := page.Navigate(ctx, fixture.URL); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a.txt"), filepath.Join(dir, "b.txt")
+	for _, f := range []string{a, b} {
+		if err := os.WriteFile(f, []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := page.Upload(ctx, "#pick", []string{a, b}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var value any
+	var err error
+	for i := 0; i < 40; i++ {
+		if value, err = page.Eval(ctx, `window.picked`); err == nil && value != nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if !reflect.DeepEqual(value, []any{"a.txt", "b.txt"}) {
+		t.Fatalf("picked=%v err=%v", value, err)
+	}
+	if err := page.Upload(ctx, "#hidden", []string{a}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if value, err = page.Eval(ctx, `document.querySelector('#hidden').files[0].name`); value != "a.txt" {
+		t.Fatalf("hidden=%v err=%v", value, err)
+	}
+	if err := page.Upload(ctx, "#one", []string{a, b}, nil); err == nil || !strings.Contains(err.Error(), "multiple files") {
+		t.Fatalf("single chooser err=%v", err)
+	}
+	if err := page.Upload(ctx, "#plain", []string{a}, nil); err == nil || !strings.Contains(err.Error(), "opened no file chooser") {
+		t.Fatalf("plain err=%v", err)
+	}
+}

@@ -39,7 +39,9 @@ steps:
       text: "Berhasil"
 ```
 
-`version` defaults to 1; other versions are rejected. `profile` defaults to
+Top-level keys are `version`, `profile`, `close`, `redact`, `viewport`
+(`width`, `height`, optional `mobile` and `dpr`), and `steps`. `version`
+defaults to 1; other versions are rejected. `profile` defaults to
 `default`. An explicit CLI `--profile` overrides the file. The runner starts or
 reuses the selected browser before running steps; missing browsers are installed
 automatically. It leaves the profile running by default. Set `close: true` only
@@ -61,31 +63,107 @@ flows you intend to execute; `eval` can execute page JavaScript.
 ## Actions
 
 Each step contains exactly one action, with optional `name`, `timeout`, and
-`save` metadata.
+`save` metadata. Actions run the CLI command of the same name, so behavior,
+results, and errors match the [command reference](../skills/wok/references/commands.md).
+`TARGET` is a CSS selector or `@eN` ref; chain ` >> ` to reach into iframes.
+
+### Page and elements
+
+| Action | Example | Notes |
+|---|---|---|
+| `open` | `open: https://example.com` | Navigate the tab; a missing scheme means HTTPS. |
+| `click` | `click: "#submit"` | Real pointer click; rejects covered or disabled elements. |
+| `dblclick` | `dblclick: ".row"` | Double-click. |
+| `hover` | `hover: "#menu"` | Move the pointer over the element. |
+| `fill` | `fill: {selector: "#email", value: "a@b.c"}` | Replace an input, textarea, or contentEditable's contents. |
+| `type` | `type: hello` | Insert text into the focused element. |
+| `press` | `press: Enter` | Key or shortcut such as `Tab`, `Control+a`, `Shift+Tab`. |
+| `keydown` / `keyup` | `keydown: Shift` | Dispatch a key-down or key-up event, including standalone modifiers. |
+| `check` / `uncheck` | `check: "#agree"` | Checkbox, radio, or ARIA switch; no-op when already in that state. |
+| `select` | `select: {selector: "#size", value: m}` | One option by value or label; `values: [a, b]` for a multi-select. |
+| `drag` | `drag: {from: "#card", to: "#done"}` | Pointer drag with HTML5 drag-and-drop. |
+| `upload` | `upload: {selector: "#avatar", files: [fixtures/me.png]}` | See [Files](#files). |
+| `drop` | `drop: {selector: "#zone", files: [a.png]}` or `{selector: "#zone", text: hi}` | Drop files or text onto an element. |
+| `go-back` / `go-forward` / `reload` | `reload: true` | History navigation; waits for load. |
+| `tab` | `tab: {new: URL}`, `tab: {select: ID}`, `tab: {close: ID}` | Open, select, or close a tab; `new` results include `targetId`. |
+| `set` | `set: {device: iphone-14}`, `{media: dark}`, `{offline: true}` | Exactly one field. Devices: `iphone-14`, `pixel-7`, `ipad-mini`, `desktop`. |
+| `dialog` | `dialog: {accept: true, promptText: "yes"}` | Policy for future `alert`/`confirm`/`prompt` dialogs. |
+
+### Reading and waiting
+
+| Action | Example | Notes |
+|---|---|---|
+| `eval` | `eval: document.title` | Returns JSON; promises are awaited; a throw fails the step. |
+| `get` | `get: {kind: text, selector: "#result"}` | `kind`: `title`, `url`, `text` (selector optional), `html`, `value`, `attr` (with `attr: NAME`). |
+| `find` | `find: {kind: role, value: button, nth: 2}` | `kind`: `role`, `text`, `css`; returns refs usable later in the run. |
+| `snapshot` | `snapshot: true` or `snapshot: {interactive: true}` | Accessibility tree with `@eN` refs. |
+| `wait` | `wait: "#ready"` | Waits for a selector to exist. |
+| `wait` | `wait: {selector: "#spinner", state: hidden}` | `state`: `attached`, `detached`, `visible`, `hidden`. |
+| `wait` | `wait: {text: Saved}`, `{url: /done}`, `{fn: "window.ready"}`, `{load: true}`, `{networkIdle: true, idleMs: 500}`, `{download: true}` | Exactly one condition. |
+| `expect` | `expect: {selector: "#ok", text: Done}` | Polling assertion; see [Assertions](#assertions). |
+| `console` / `errors` | `console: true` | Recorded console messages or uncaught errors. |
+| `downloads` / `dialogs` | `downloads: true` | Recorded downloads or dialogs. |
+
+### Storage, files, and output
+
+| Action | Example | Notes |
+|---|---|---|
+| `cookies` | `cookies: {action: set, name: sid, value: x, domain: example.com}` | `action`: `list`, `set`, `delete`, `clear`; also `path`, `url`, `secure`, `httpOnly`, `sameSite`, `expires`. |
+| `storage` | `storage: {area: local, action: set, key: k, value: v}` | `area`: `local`/`session`; `action`: `list`, `get`, `set`, `delete`, `clear`. |
+| `state-save` | `state-save: state.json` | Save cookies and per-origin localStorage. |
+| `state-load` | `state-load: fixtures/state.json` | Restore saved state, e.g. a logged-in session. |
+| `screenshot` | `screenshot: success.png` | Viewport PNG. |
+| `pdf` | `pdf: page.pdf` | Print the page to PDF. |
+
+### Network
+
+| Action | Example | Notes |
+|---|---|---|
+| `route` | `route: {pattern: "**/api/**", status: 200, body: "{}"}` | Mock or abort requests; see [Network mocking](#network-mocking). |
+| `unroute` | `unroute: "**/api/**"` or `unroute: true` | Remove one route or all. |
+| `network` | `network: true` or `network: {method: POST, url: "**/chat/**", type: Fetch, body: true}` | List recorded requests. |
+| `request` | `request: 3` | Headers and bodies of one request (index from `network`). |
+
+### Flow control
 
 | Action | Example |
 |---|---|
-| Navigate | `open: https://example.com` |
-| Click | `click: "#submit"` |
-| Fill | `fill: {selector: "#email", value: "test@example.com"}` |
-| Type in focused element | `type: hello` |
-| Press key | `press: Enter` |
-| Evaluate JavaScript | `eval: document.title` |
-| Read data | `get: {kind: text, selector: "#result"}` |
-| Read attribute | `get: {kind: attr, selector: "#next", attr: href}` |
-| Wait for existence | `wait: "#ready"` |
-| Save viewport image | `screenshot: success.png` |
-| Snapshot | `snapshot: {interactive: true}` |
-| Open tab | `tab: {new: "https://example.org"}` |
-| Select tab | `tab: {select: "${details.targetId}"}` |
-| Close tab | `tab: {close: "${details.targetId}"}` |
-| Mock a request | `route: {pattern: "**/api/**", status: 200, body: "{}"}` |
-| Remove routes | `unroute: "**/api/**"` or `unroute: true` (all) |
-| List requests | `network: true`, or filtered: `network: {method: POST, url: "**/api/chat/**", type: Fetch, body: true}` |
-| Inspect a request | `request: 3` (index from `network`) |
-| Branch | `if: {selector: "#banner"}` with `then:` / `else:` steps |
-| Loop | `repeat: {times: 3, steps: [...]}`, `repeat: {until: {...}, steps: [...]}` |
-| Iterate | `each: {items: [a, b], steps: [...]}` |
+| `if` | `if: {selector: "#banner"}` with `then:` / `else:` steps |
+| `repeat` | `repeat: {times: 3, steps: [...]}`, `repeat: {until: {...}, steps: [...]}` |
+| `each` | `each: {items: [a, b], steps: [...]}` |
+
+`console`, `errors`, `network`, `downloads`, `dialogs`, `dialog`, `set`,
+`route`, `unroute`, `request`, `wait: {networkIdle}`, `wait: {download}`, and
+`network` conditions need a managed profile and fail validation with `--cdp`.
+
+### Files
+
+Files a step reads resolve relative to the flow file's directory, so a flow
+finds its fixtures from any working directory: `upload` and `drop` files,
+`route` `bodyFile`, and `state-load`. Files a step writes (`screenshot`, `pdf`,
+`state-save`) resolve relative to the working directory; create parent
+directories first. Flows read from stdin (`wok run -`) resolve everything
+relative to the working directory. Absolute paths are used as given.
+
+`upload` works with any upload control:
+
+- On an `<input type="file">`, visible or hidden, it sets the files directly
+  and fires `input` and `change`.
+- On anything else, such as a styled "Attach" button or a page that creates a
+  file input on click, it clicks the element and answers the file chooser that
+  opens. It fails if no chooser opens within 5 seconds.
+
+Several files need an input with `multiple`. Pages that use
+`window.showOpenFilePicker()` cannot be driven this way; use their file input
+or drop zone (`drop`) instead.
+
+### Not available in flows
+
+Raw mouse events (`mousemove`, `mousedown`, `mouseup`, `mousewheel`), tracing,
+video, action recording, the JavaScript debugger, `highlight`,
+`generate-locator`, and raw `cdp` are CLI-only. Run them around `wok run`, or
+batch them with `wok exec FILE`. Use the top-level `viewport` key or `set:
+{device}` instead of `viewport`/`resize`, and `eval` for one-off page scripting.
 
 ## Control flow
 

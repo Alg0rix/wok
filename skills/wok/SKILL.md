@@ -52,10 +52,20 @@ Refresh the snapshot after navigation or DOM updates that replace elements. Each
 | **Sessions** | `-s=<name> <cmd>`, `--profile <name>`, `list`, `profile list`, `close-all`, `kill-all` |
 | **Global options** | `--help [command]`, `--json`, `--raw`, `--version`, `--tab <id>`, `--timeout <d>`, `--cdp <url>`, `--headed`, `--no-sandbox`, `--no-render`, `--listen <addr>`, `--port <n>`, `--auth-token <tok\|auto>`, `--embed-origin <origin>`, `--download-dir <dir>`, `--proxy <url>`, `--proxy-bypass <pat>`, `--close-external`, `--browser-level` |
 
+## Flows: batches and E2E tests
+
+For repeatable sequences, write a YAML flow and run it in one call instead of many commands:
+
+```sh
+wok -s=e2e run checkout.wok.yaml --var APP_URL=http://localhost:3000
+```
+
+Flows cover element actions (`click`, `fill`, `select`, `check`, `upload`, `drag`, `drop`, ...), polling assertions (`expect`), `if`/`repeat`/`each`, network mocks (`route`), request inspection (`network`, `request`), and variables (`${NAME}`, `save`, `${NAME|json}`). `upload` also handles buttons that open a file chooser. Fixture paths resolve from the flow file's directory. Read [references/flows.md](references/flows.md) before writing a flow.
+
 ## Output, live viewer, and cleanup
 
 Commands emit JSON on stdout (except default text `snapshot`, `terminal`, and `--raw` which unwraps JSON strings). Failures emit `{"error":"..."}` on stderr with exit code 1.
 
 Use `wok -s=research render` (or `wok -s=research show`) to get the live `/render` viewer URL. Stop temporary profiles with `wok -s=research stop` (preserves storage) or `wok -s=research delete-data` (wipes storage).
 
-For full syntax, flags, and examples of every command, read [references/commands.md](references/commands.md).
+For full syntax, flags, and examples of every command, read [references/commands.md](references/commands.md). For flow files, read [references/flows.md](references/flows.md).

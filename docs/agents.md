@@ -108,7 +108,9 @@ so branching logic need not move into `eval`. Filter requests with
 `network: {method, url, body: true}`, wait for them with
 `expect: {network: {url, count}}`, and pass saved values into JavaScript as JSON
 literals with `${name|json}`. Errors redact variable and saved text values;
-use `redact: false` or `--no-redact` to see them. `wok run FILE` emits a report;
+use `redact: false` or `--no-redact` to see them. Flows also run the element,
+upload, drop, storage, and navigation commands; fixture paths resolve next to
+the flow file. `wok run FILE` emits a report;
 failure screenshots use an artifact directory. Store stable selectors in flows,
 rather than refs from previous runs.
 
@@ -248,7 +250,7 @@ profile running unless the task requests its closure.
 | `check <target>` / `uncheck <target>` | Check or uncheck a checkbox, radio button, or ARIA switch |
 | `drag <start> <end>` | Drag from `<start>` to `<end>` (pointer + HTML5 `DataTransfer`) |
 | `drop <target> <files...\|--text text>` | Drop local files or `text/plain` onto `<target>` |
-| `upload <target> <files...>` | Set local files on an `<input type="file">` |
+| `upload <target> <files...>` | Set local files on an `<input type="file">`, or click `<target>` and answer the file chooser it opens |
 | `get text\|title\|url [selector]` | Read page/element text, document title, or URL |
 | `get attr <selector> <name>` | Read an element attribute |
 | `eval <func\|expr> [target]` | Evaluate JS on the page, or call `el => ...` on `<target>` |

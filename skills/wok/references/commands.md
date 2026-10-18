@@ -48,7 +48,7 @@ wok close-all
 | `wok drag <start> <end>` | Drag from `<start>` to `<end>` using pointer movement and HTML5 drag-and-drop transfer. |
 | `wok drop <target> <file...>` | Drop one or more local files onto `<target>`. |
 | `wok drop <target> --text <text>` | Drop `text/plain` data onto `<target>`. |
-| `wok upload <target> <file...>` | Set local files on an `<input type="file">` element. |
+| `wok upload <target> <file...>` | Set local files on an `<input type="file">` (hidden inputs work), firing `input`/`change`. Any other target is clicked and the file chooser it opens is answered, which covers styled upload buttons and inputs created on click. Several files need a `multiple` input. `window.showOpenFilePicker()` is not supported. |
 | `wok get text\|title\|url [selector]` | Read visible page/element text, document title, or URL. |
 | `wok get attr <selector> <name>` | Read an attribute from an element. |
 | `wok eval <js> [target]` | Evaluate JavaScript on the page, or pass `<target>` as the first argument to `<js>` (`el => ...`). Promises are awaited. |
@@ -140,7 +140,7 @@ wok close-all
 | `wok dialogs` | Read recorded JavaScript dialogs (`type`, `message`, `accepted`, `promptText`). |
 | `wok run-code [code]` | Execute newline-separated Wok command lines from the argument or stdin. |
 | `wok exec <file\|->` | Execute newline-separated Wok command lines from a file or stdin. |
-| `wok run <file\|-> [--var K=V] [--artifacts DIR] [--no-redact]` | Run a YAML/JSON action flow with optional E2E assertions, `if`/`repeat`/`each` control flow, and `route`/`unroute`/`request` network steps (see docs/flows.md). |
+| `wok run <file\|-> [--var K=V] [--artifacts DIR] [--no-redact]` | Run a YAML/JSON action flow with optional E2E assertions, `if`/`repeat`/`each` control flow, and network steps. See [flows.md](flows.md). |
 | `wok recording-start` | Record user clicks, fills, selects, checks, and keys in the page. |
 | `wok recording-stop` | Stop recording and return both structured `actions` and a replayable `wok exec` `script`. |
 | `wok tracing-start [categories]` | Start Chromium trace capture. |
@@ -168,8 +168,21 @@ wok close-all
 | `--tab <id>` | Target a specific tab ID for this command without changing the profile's selected tab. |
 | `--frame <iframe>` | Scope element commands, `eval`, `snapshot`, `find`, and `wait` to the document inside an iframe (CSS selector, `@ref`, or ` >> ` chain for nested frames). Navigation and tab commands still act on the tab. |
 | `--cdp <url>` | Operate against an external HTTP or WebSocket CDP endpoint. |
+| `--browser <path>` | Browser executable for `start` (overrides the auto-installed Chromium; also `WOK_BROWSER`). |
+| `--headed` | Show the browser window (`start` only). |
+| `--no-sandbox` | Disable the Chromium sandbox (`start` only); needed where unprivileged user namespaces are blocked, such as Ubuntu with AppArmor, unless the system browser is used. |
+| `--no-render` | Start without the `/render` controller; also disables recording of events from before a command. |
+| `--listen <host:port>` / `--port <n>` | Controller HTTP/CDP/MCP address (default loopback, automatic port). |
+| `--auth-token <token\|auto>` | Require a bearer or query token on remote APIs. |
+| `--embed-origin <origin>` | Allow embedding and API calls from an origin (repeatable). |
+| `--download-dir <dir>` | Browser download directory. |
+| `--proxy <url>` / `--proxy-bypass <patterns>` | HTTP(S)/SOCKS proxy (HTTP `user:pass` supported) and comma-separated bypass patterns. |
+| `--close-external` | Allow `stop` against an explicitly supplied `--cdp` browser. |
+| `--browser-level` | Send `cdp` commands to the browser instead of the active page. |
 | `--timeout <duration>` | Bound total command execution time (e.g. `500ms`, `30s`; default `15s`, or `5m` for `start`/`install-browser`/`run`). |
 | `--json` | Emit JSON for `snapshot` (all other non-terminal commands emit JSON by default). |
 | `--raw` | Print string results without surrounding JSON quotes. |
 | `--help [command]` | Show global help or command-specific usage (`wok --help click` or `wok click --help`). |
 | `--version` | Emit the Wok version as JSON. |
+
+Environment: `WOK_HOME` overrides the private state root, `WOK_BROWSER` the browser executable, and `WOK_BROWSER_CACHE` the shared browser download cache.

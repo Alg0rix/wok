@@ -389,7 +389,10 @@ func (p *Page) Wait(ctx context.Context, options WaitOptions) error {
 	}
 }
 
-// Upload sets real files on an input using CDP, which emits input/change events.
+// Upload sets real files on a file input using CDP, which emits input/change
+// events. When the target is not a file input, Upload clicks it and answers
+// the file chooser it opens, which covers styled buttons and inputs that
+// pages create on demand.
 func (p *Page) Upload(ctx context.Context, selector string, files []string, refs *Refs) error {
 	if len(files) == 0 {
 		return errors.New("upload requires at least one file")
@@ -409,18 +412,67 @@ func (p *Page) Upload(ctx context.Context, selector string, files []string, refs
 		}
 		absolute[i] = path
 	}
-	p, id, err := p.resolve(ctx, selector, refs)
+	q, id, err := p.resolve(ctx, selector, refs)
 	if err != nil {
 		return err
 	}
-	defer p.Call(ctx, "Runtime.releaseObject", map[string]any{"objectId": id}, nil)
+	defer q.Call(ctx, "Runtime.releaseObject", map[string]any{"objectId": id}, nil)
 	var verified remoteResult
-	fn := `function(){if(!this.isConnected)throw new Error('stale ref: element removed');if(!(this instanceof HTMLInputElement)||this.type!=='file')throw new Error('upload requires an input[type=file]');if(this.matches(':disabled'))throw new Error('file input is disabled');if(` + strconv.Itoa(len(files)) + `>1&&!this.multiple)throw new Error('multiple files require a multiple file input');return true;}`
-	if err = p.Call(ctx, "Runtime.callFunctionOn", map[string]any{"objectId": id, "functionDeclaration": fn, "returnByValue": true}, &verified); err != nil {
+	fn := `function(){if(!this.isConnected)throw new Error('stale ref: element removed');if(!(this instanceof HTMLInputElement)||this.type!=='file')return false;if(this.matches(':disabled'))throw new Error('file input is disabled');if(` + strconv.Itoa(len(files)) + `>1&&!this.multiple)throw new Error('multiple files require a multiple file input');return true;}`
+	if err = q.Call(ctx, "Runtime.callFunctionOn", map[string]any{"objectId": id, "functionDeclaration": fn, "returnByValue": true}, &verified); err != nil {
 		return err
 	}
 	if err = remoteError(verified); err != nil {
 		return err
 	}
-	return p.Call(ctx, "DOM.setFileInputFiles", map[string]any{"files": absolute, "objectId": id}, nil)
+	if isInput, _ := verified.Result.Value.(bool); !isInput {
+		return p.uploadViaChooser(ctx, selector, absolute, refs)
+	}
+	return q.Call(ctx, "DOM.setFileInputFiles", map[string]any{"files": absolute, "objectId": id}, nil)
+}
+
+// chooserWait bounds how long a click may take to open a file chooser.
+const chooserWait = 5 * time.Second
+
+func (p *Page) uploadViaChooser(ctx context.Context, selector string, files []string, refs *Refs) error {
+	sessions := map[string]bool{p.SessionID: true, p.Top().SessionID: true}
+	events, unsub := p.Client.Subscribe("Page.fileChooserOpened")
+	defer unsub()
+	for session := range sessions {
+		if err := p.Client.Call(ctx, session, "Page.setInterceptFileChooserDialog", map[string]any{"enabled": true}, nil); err != nil && session == p.Top().SessionID {
+			return err
+		}
+		defer p.Client.Call(context.WithoutCancel(ctx), session, "Page.setInterceptFileChooserDialog", map[string]any{"enabled": false}, nil)
+	}
+	if err := p.Click(ctx, selector, refs); err != nil {
+		return err
+	}
+	timer := time.NewTimer(chooserWait)
+	defer timer.Stop()
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				return errors.New("browser connection closed")
+			}
+			if !sessions[ev.SessionID] {
+				continue
+			}
+			var opened struct {
+				Mode          string `json:"mode"`
+				BackendNodeID int    `json:"backendNodeId"`
+			}
+			if err := json.Unmarshal(ev.Params, &opened); err != nil {
+				return err
+			}
+			if len(files) > 1 && opened.Mode != "selectMultiple" {
+				return errors.New("multiple files require a multiple file input")
+			}
+			return p.Client.Call(ctx, ev.SessionID, "DOM.setFileInputFiles", map[string]any{"files": files, "backendNodeId": opened.BackendNodeID}, nil)
+		case <-timer.C:
+			return fmt.Errorf("upload target %s is not a file input and clicking it opened no file chooser within %s (showOpenFilePicker is not supported)", selector, chooserWait)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
