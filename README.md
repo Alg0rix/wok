@@ -6,6 +6,26 @@ act, and exit. The browser keeps running with its tabs, cookies, and storage.
 Wok is a Go binary with small WebSocket and YAML dependencies. It does not use Playwright or
 Puppeteer at runtime.
 
+## Why Wok
+
+Agents drive browsers one shell command at a time. Wok keeps the browser running
+and attaches straight to it, so each command costs milliseconds instead of a new
+Node process plus Playwright startup.
+
+![Wok vs Playwright median latency: Wok CLI 13 ms vs Playwright script 666 ms to evaluate JavaScript](bench/benchmark.svg)
+
+| Per command (median) | Wok CLI | Playwright script (warm browser) | Speedup |
+|---|---:|---:|---:|
+| Evaluate JavaScript | 13 ms | 666 ms | 51× |
+| Navigate to page | 66 ms | 742 ms | 11× |
+| Fill, click, wait, read | 133 ms | 854 ms | 6× |
+
+Both sides attach to the same already-running browser, and every sample is a new
+process, which is how agents call tools. Inside one long-lived script Playwright
+is equally fast or faster (its in-process bars); Wok gives you that speed from
+the shell without writing or hosting a script. Method, p95 and raw samples:
+[bench/RESULTS.md](bench/RESULTS.md).
+
 ## Install
 
 Linux and macOS:

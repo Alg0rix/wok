@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir, cpus, platform, arch, totalmem } from 'node:os';
 import { resolve, dirname, join, relative, basename, sep } from 'node:path';
+import { renderChart } from './chart.mjs';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import assert from 'node:assert/strict';
@@ -117,9 +118,9 @@ try {
       'Sandbox disabled for all browser launches in this test environment; no claim about production websites or anti-bot behavior.'
     ]
   };
-  const jsonPath=join(here,'results.json');await writeFile(jsonPath,JSON.stringify(output,null,2)+'\n');
+  const jsonPath=join(here,'results.json');await writeFile(jsonPath,JSON.stringify(output,null,2)+'\n');await writeFile(join(here,'benchmark.svg'),renderChart(output));
   const table=rows.map(r=>`| ${r.name} | ${r.workload} | ${r.medianMs.toFixed(2)} | ${r.p95Ms.toFixed(2)} |`).join('\n');
-  const report=`# Wok vs Playwright benchmark\n\nRecorded ${output.recordedAt}. ${output.cpu}; ${output.cpuThreads} logical CPUs; ${output.platform}/${output.arch}.\n\nEngine: ${browserVersion}. Playwright ${pwVersion}; Node ${output.node}; ${samples} samples per row.\n\n| Mode | Workload | Median (ms) | p95 (ms) |\n|---|---|---:|---:|\n${table}\n\nWok first start (browser + idle render service): ${firstStartMs.toFixed(2)} ms. Binary: ${(output.wokBinaryBytes/1048576).toFixed(2)} MiB (unstripped).\n\n## Method\n\n${output.methodology.map(x=>'- '+x).join('\n')}\n\nMemory snapshot and every raw latency sample: [results.json](results.json).\n\n## Interpretation\n\nWok optimizes shell-driven agent commands and profile reuse. Playwright also supports persistent browser attachment; its resident mode is the useful control for separating lifecycle cost from protocol/action cost. Cold-launch measurements must not be presented as evidence that Playwright always starts cold. This small local fixture does not establish performance on real-world sites.\n`;
+  const report=`# Wok vs Playwright benchmark\n\nRecorded ${output.recordedAt}. ${output.cpu}; ${output.cpuThreads} logical CPUs; ${output.platform}/${output.arch}.\n\nEngine: ${browserVersion}. Playwright ${pwVersion}; Node ${output.node}; ${samples} samples per row.\n\n| Mode | Workload | Median (ms) | p95 (ms) |\n|---|---|---:|---:|\n${table}\n\nWok first start (browser + idle render service): ${firstStartMs.toFixed(2)} ms. Binary: ${(output.wokBinaryBytes/1048576).toFixed(2)} MiB (unstripped).\n\n## Method\n\n${output.methodology.map(x=>'- '+x).join('\n')}\n\n![Wok vs Playwright median latency](benchmark.svg)\n\nMemory snapshot and every raw latency sample: [results.json](results.json).\n\n## Interpretation\n\nWok optimizes shell-driven agent commands and profile reuse. Playwright also supports persistent browser attachment; its resident mode is the useful control for separating lifecycle cost from protocol/action cost. Cold-launch measurements must not be presented as evidence that Playwright always starts cold. This small local fixture does not establish performance on real-world sites.\n`;
   await writeFile(join(here,'RESULTS.md'),report);
   console.log(`Saved ${jsonPath}`);
 } finally {

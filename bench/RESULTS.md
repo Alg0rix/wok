@@ -34,6 +34,8 @@ Wok first start (browser + idle render service): 145.40 ms. Binary: 11.13 MiB (u
 - Memory is one idle Linux /proc snapshot, not peak memory. RSS sums shared pages multiple times; PSS apportions shared pages.
 - Sandbox disabled for all browser launches in this test environment; no claim about production websites or anti-bot behavior.
 
+![Wok vs Playwright median latency](benchmark.svg)
+
 Memory snapshot and every raw latency sample: [results.json](results.json).
 
 ## Interpretation
