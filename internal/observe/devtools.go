@@ -20,7 +20,9 @@ import (
 
 // Route mocks or blocks requests whose URL matches Pattern (a glob where **
 // matches anything and * matches anything except "/"; a pattern without
-// wildcards matches as a substring).
+// wildcards matches as a substring). The newest matching route wins. A route
+// with Times > 0 handles that many requests, then lets older routes or the
+// network handle later ones.
 type Route struct {
 	Pattern     string            `json:"pattern"`
 	Status      int               `json:"status,omitempty"`
@@ -28,12 +30,17 @@ type Route struct {
 	ContentType string            `json:"contentType,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"`
 	Abort       bool              `json:"abort,omitempty"`
+	Times       int               `json:"times,omitempty"`
+	Hits        int               `json:"hits"`
 	re          *regexp.Regexp
 }
 
 func compileRoute(r *Route) error {
 	if r.Pattern == "" {
 		return errors.New("route pattern must not be empty")
+	}
+	if r.Times < 0 {
+		return errors.New("route times must not be negative")
 	}
 	if !strings.ContainsAny(r.Pattern, "*") {
 		r.re = regexp.MustCompile(regexp.QuoteMeta(r.Pattern))
@@ -56,6 +63,16 @@ func compileRoute(r *Route) error {
 	var err error
 	r.re, err = regexp.Compile(b.String())
 	return err
+}
+
+// RouteHint explains why a glob pattern cannot match an http(s) URL, or
+// returns "" when it can. Globs match the whole URL including the scheme, so
+// "*/api/*" never matches "http://host/api/x"; "**/api/**" does.
+func RouteHint(pattern string) string {
+	if !strings.Contains(pattern, "*") || strings.Contains(pattern, "**") || strings.Contains(pattern, "://") {
+		return ""
+	}
+	return fmt.Sprintf("route pattern %q is matched against the full URL and * does not match \"/\", so it cannot match http(s) URLs; use ** (for example \"**/api/**\")", pattern)
 }
 
 // RecordedAction is one user interaction captured by recording-start.
@@ -180,8 +197,11 @@ func (m *Manager) fetchPaused(event cdp.Event) {
 	m.mu.Lock()
 	var route *Route
 	for i := len(m.routes) - 1; i >= 0; i-- {
-		if m.routes[i].re.MatchString(p.Request.URL) {
-			route = m.routes[i]
+		r := m.routes[i]
+		if (r.Times == 0 || r.Hits < r.Times) && r.re.MatchString(p.Request.URL) {
+			r.Hits++
+			copied := *r
+			route = &copied
 			break
 		}
 	}
@@ -445,10 +465,13 @@ func (m *Manager) serveRoutes(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
 			return
 		}
+		route.Hits = 0
 		m.mu.Lock()
+		// A timed route stacks on top of routes with the same pattern; an
+		// untimed route replaces them.
 		kept := m.routes[:0]
 		for _, existing := range m.routes {
-			if existing.Pattern != route.Pattern {
+			if route.Times > 0 || existing.Pattern != route.Pattern {
 				kept = append(kept, existing)
 			}
 		}
@@ -479,7 +502,10 @@ func (m *Manager) serveRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	m.mu.Lock()
-	routes := append([]*Route{}, m.routes...)
+	routes := make([]Route, len(m.routes))
+	for i, r := range m.routes {
+		routes[i] = *r
+	}
 	m.mu.Unlock()
 	writeJSON(w, 200, routes)
 }

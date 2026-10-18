@@ -47,6 +47,16 @@ func objectWithTypes(n *yaml.Node, schema map[string]string, required ...string)
 				}
 			}
 			value = values
+		case "stringmap":
+			var m map[string]string
+			if node.Kind != yaml.MappingNode || node.Decode(&m) != nil {
+				return nil, fmt.Errorf("%s must map names to strings", key)
+			}
+			values := map[string]any{}
+			for k, v := range m {
+				values[k] = v
+			}
+			value = values
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", key, err)

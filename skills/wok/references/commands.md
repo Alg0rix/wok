@@ -125,7 +125,7 @@ wok close-all
 | `wok request-body <index>` | Return request POST body for request `<index>`. |
 | `wok response-headers <index>` | Return response headers for request `<index>`. |
 | `wok response-body <index>` | Return text response body (or save binary response body to `response-<index>.<ext>`). |
-| `wok route <pattern> [options]` | Mock or abort matching URLs (`--status N`, `--body TEXT`, `--body-file FILE`, `--content-type TYPE`, `--header K:V`, `--abort`). |
+| `wok route <pattern> [options]` | Mock or abort matching URLs (`--status N`, `--body TEXT`, `--body-file FILE`, `--content-type TYPE`, `--header K:V`, `--times N`, `--abort`). Globs match the full URL, so use `**/api/**`, not `*/api/*`. The newest matching route wins; a `--times` route stacks on same-pattern routes and expires after N hits. `route-list` shows `hits` per route. |
 | `wok route-list` | List active network routes for the profile. |
 | `wok unroute [pattern]` | Remove a matching route pattern, or all routes when `pattern` is omitted. |
 | `wok network-state-set online\|offline` | Toggle offline network emulation. |
@@ -140,7 +140,7 @@ wok close-all
 | `wok dialogs` | Read recorded JavaScript dialogs (`type`, `message`, `accepted`, `promptText`). |
 | `wok run-code [code]` | Execute newline-separated Wok command lines from the argument or stdin. |
 | `wok exec <file\|->` | Execute newline-separated Wok command lines from a file or stdin. |
-| `wok run <file\|-> [--var K=V] [--artifacts DIR]` | Run a YAML/JSON action flow with optional E2E assertions. |
+| `wok run <file\|-> [--var K=V] [--artifacts DIR]` | Run a YAML/JSON action flow with optional E2E assertions, `if`/`repeat`/`each` control flow, and `route`/`unroute`/`request` network steps (see docs/flows.md). |
 | `wok recording-start` | Record user clicks, fills, selects, checks, and keys in the page. |
 | `wok recording-stop` | Stop recording and return both structured `actions` and a replayable `wok exec` `script`. |
 | `wok tracing-start [categories]` | Start Chromium trace capture. |

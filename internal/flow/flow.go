@@ -23,6 +23,7 @@ type Options struct {
 }
 type StepReport struct {
 	Index      int             `json:"index"`
+	Path       string          `json:"path,omitempty"`
 	Name       string          `json:"name,omitempty"`
 	Action     string          `json:"action"`
 	OK         bool            `json:"ok"`
@@ -78,39 +79,8 @@ func Run(ctx context.Context, source []byte, opts Options, exec Executor) (repor
 	if exec == nil {
 		return failValidation(errors.New("flow executor is required"))
 	}
-	saved := map[string]bool{}
-	for i := range doc.steps {
-		s := &doc.steps[i]
-		if opts.Endpoint != "" && nativeManaged(s.action, s.value) {
-			return failValidation(fmt.Errorf("step %d: %s requires a managed profile", i+1, s.action))
-		}
-		s.value, err = vars.compileValue(s.value, saved)
-		if err != nil {
-			return failValidation(fmt.Errorf("step %d: %w", i+1, err))
-		}
-		s.timeout, err = vars.compileValue(s.timeout, saved)
-		if err != nil {
-			return failValidation(fmt.Errorf("step %d: %w", i+1, err))
-		}
-		if !hasDynamic(s.timeout) {
-			value, _ := vars.resolve(s.timeout)
-			if _, err = duration(value); err != nil {
-				return failValidation(fmt.Errorf("step %d: %w", i+1, err))
-			}
-		}
-		if err = validateKnownNative(s.action, s.value, vars); err != nil {
-			return failValidation(fmt.Errorf("step %d: %w", i+1, err))
-		}
-		// Check statically available action semantics before starting a browser.
-		if !hasDynamic(s.value) {
-			value, _ := vars.resolve(s.value)
-			if err = validateAction(s.action, value); err != nil {
-				return failValidation(fmt.Errorf("step %d: %w", i+1, err))
-			}
-		}
-		if s.save != "" {
-			saved[s.save] = true
-		}
+	if err = prepareSteps(doc.steps, vars, opts.Endpoint != "", map[string]bool{}, ""); err != nil {
+		return failValidation(err)
 	}
 	route := func(args []string, timeout time.Duration) []string {
 		prefix := []string{"--profile", profile}
@@ -179,56 +149,11 @@ func Run(ctx context.Context, source []byte, opts Options, exec Executor) (repor
 			return fail(fmt.Errorf("set viewport: %w", err))
 		}
 	}
-	for i, s := range doc.steps {
-		failedIndex = i + 1
-		began := time.Now()
-		sr := StepReport{Index: i + 1, Name: s.name, Action: s.action}
-		value, e := vars.resolve(s.value)
-		timeoutValue, timeoutErr := vars.resolve(s.timeout)
-		if e == nil {
-			e = timeoutErr
-		}
-		var timeout time.Duration
-		if e == nil {
-			timeout, e = duration(timeoutValue)
-		}
-		if e == nil {
-			e = validateAction(s.action, value)
-		}
-		var result json.RawMessage
-		if e == nil {
-			stepCtx, cancel := context.WithTimeout(ctx, timeout)
-			if e = stepCtx.Err(); e == nil {
-				if s.action == "expect" {
-					result, e = assert(stepCtx, value.(map[string]any), func(c context.Context, args []string) (json.RawMessage, error) { return exec(c, route(args, timeout)) })
-				} else {
-					var args []string
-					args, e = actionArgs(s.action, value)
-					if e == nil {
-						result, e = exec(stepCtx, route(args, timeout))
-					}
-				}
-			}
-			cancel()
-		}
-		if e == nil && len(result) > 0 && !json.Valid(result) {
-			e = errors.New("executor returned invalid JSON")
-		}
-		if e == nil && s.save != "" {
-			e = vars.capture(s.save, result)
-		}
-		sr.DurationMS = time.Since(began).Milliseconds()
-		sr.OK = e == nil
-		if e != nil {
-			e = vars.redact(e)
-			sr.Error = e.Error()
-		} else {
-			sr.Result = result
-		}
-		report.Steps = append(report.Steps, sr)
-		if e != nil {
-			return fail(fmt.Errorf("step %d (%s): %w", i+1, s.action, e))
-		}
+	r := &runner{vars: vars, report: &report, failedIndex: &failedIndex, exec: func(c context.Context, args []string, timeout time.Duration) (json.RawMessage, error) {
+		return exec(c, route(args, timeout))
+	}}
+	if err = r.run(ctx, doc.steps, 0, ""); err != nil {
+		return fail(err)
 	}
 	failedIndex = 0
 	return report, nil
@@ -258,6 +183,9 @@ func validateAction(action string, value any) error {
 		return nil
 	}
 	if handled, err := validateNative(action, value); handled {
+		return err
+	}
+	if handled, err := validateFlowAction(action, value); handled {
 		return err
 	}
 	switch action {
@@ -310,6 +238,9 @@ func validateAction(action string, value any) error {
 }
 func actionArgs(action string, value any) ([]string, error) {
 	if args, ok := nativeArgs(action, value); ok {
+		return args, nil
+	}
+	if args, ok := networkArgs(action, value); ok {
 		return args, nil
 	}
 	switch action {

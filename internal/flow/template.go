@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -175,19 +176,44 @@ func (v *variables) capture(name string, raw json.RawMessage) error {
 			delete(v.values, k)
 		}
 	}
-	return v.flatten(name, value)
+	return v.flatten(name, value, true)
 }
-func (v *variables) flatten(name string, value any) error {
+
+// setLocal stores a loop variable. Loop values are not page data, so they are
+// not treated as secrets for error redaction.
+func (v *variables) setLocal(name string, value any) {
+	for k := range v.values {
+		if k == name || strings.HasPrefix(k, name+".") {
+			delete(v.values, k)
+		}
+	}
+	_ = v.flatten(name, value, false)
+}
+
+// flatten stores scalars under name, object fields under name.FIELD, and
+// arrays as JSON text under name plus name.N items and name.length.
+func (v *variables) flatten(name string, value any, secret bool) error {
 	switch x := value.(type) {
 	case map[string]any:
 		for k, item := range x {
-			if err := v.flatten(name+"."+k, item); err != nil {
+			if err := v.flatten(name+"."+k, item, secret); err != nil {
 				return err
 			}
 		}
 		return nil
 	case []any:
-		return errors.New("cannot save an array as a scalar variable")
+		data, err := json.Marshal(x)
+		if err != nil {
+			return err
+		}
+		v.values[name] = string(data)
+		v.values[name+".length"] = strconv.Itoa(len(x))
+		for i, item := range x {
+			if err := v.flatten(name+"."+strconv.Itoa(i), item, secret); err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		var s string
 		if text, ok := value.(string); ok {
@@ -200,7 +226,7 @@ func (v *variables) flatten(name string, value any) error {
 			s = string(data)
 		}
 		v.values[name] = s
-		if s != "" {
+		if secret && s != "" {
 			v.secrets[s] = true
 		}
 		return nil

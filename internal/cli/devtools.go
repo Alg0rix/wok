@@ -18,6 +18,7 @@ import (
 
 	"github.com/alg0rix/wok/internal/browser"
 	"github.com/alg0rix/wok/internal/cdp"
+	"github.com/alg0rix/wok/internal/observe"
 	"github.com/alg0rix/wok/internal/session"
 )
 
@@ -393,7 +394,10 @@ func responseBody(value any, index string) (any, error) {
 
 func route(ctx context.Context, a []string, store *session.Store, state *session.State) (any, error) {
 	if len(a) < 1 {
-		return nil, errors.New("usage: wok route PATTERN [--status N] [--body TEXT|--body-file FILE] [--content-type TYPE] [--header K:V] [--abort]")
+		return nil, errors.New("usage: wok route PATTERN [--status N] [--body TEXT|--body-file FILE] [--content-type TYPE] [--header K:V] [--times N] [--abort]")
+	}
+	if hint := observe.RouteHint(a[0]); hint != "" {
+		return nil, errors.New(hint)
 	}
 	r := map[string]any{"pattern": a[0]}
 	headers := map[string]string{}
@@ -423,6 +427,12 @@ func route(ctx context.Context, a []string, store *session.Store, state *session
 			r["body"] = string(data)
 		case "--content-type":
 			r["contentType"] = value
+		case "--times":
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 1 {
+				return nil, errors.New("--times must be a positive integer")
+			}
+			r["times"] = n
 		case "--header":
 			k, v, ok := strings.Cut(value, ":")
 			if !ok || strings.TrimSpace(k) == "" {
@@ -829,7 +839,7 @@ var helpSummaries = map[string]string{
 	"request-body":          "wok request-body INDEX — Read request body for a recorded request",
 	"response-headers":      "wok response-headers INDEX — Read response headers for a recorded request",
 	"response-body":         "wok response-body INDEX — Read or save response body for a recorded request",
-	"route":                 "wok route PATTERN [--status N] [--body TEXT|--body-file FILE] [--content-type TYPE] [--header K:V] [--abort]",
+	"route":                 "wok route PATTERN [--status N] [--body TEXT|--body-file FILE] [--content-type TYPE] [--header K:V] [--times N] [--abort]",
 	"route-list":            "wok route-list — List active network routes",
 	"unroute":               "wok unroute [PATTERN] — Remove a matching route or all routes",
 	"network-state-set":     "wok network-state-set online|offline — Toggle offline network emulation",

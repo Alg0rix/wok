@@ -93,6 +93,7 @@ func remoteError(r remoteResult) error {
 	}
 	return nil
 }
+
 // Eval evaluates an expression and returns its JSON value. When the
 // expression is a function, such as '() => ...', Eval calls it and returns
 // the awaited result instead.

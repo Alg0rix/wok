@@ -23,6 +23,7 @@ type step struct {
 	name, action, save string
 	timeout            any
 	value              any
+	block              *block
 }
 
 var saveName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -183,8 +184,9 @@ func parse(source []byte) (document, error) {
 	if steps == nil || steps.Kind != yaml.SequenceNode || len(steps.Content) < 1 || len(steps.Content) > 1000 {
 		return doc, errors.New("steps must contain between 1 and 1000 actions")
 	}
+	count := 0
 	for i, n := range steps.Content {
-		s, err := parseStep(n)
+		s, err := parseStepDepth(n, 0, &count)
 		if err != nil {
 			return doc, fmt.Errorf("step %d: %w", i+1, err)
 		}
@@ -193,10 +195,29 @@ func parse(source []byte) (document, error) {
 	return doc, nil
 }
 func parseStep(n *yaml.Node) (step, error) {
+	count := 0
+	return parseStepDepth(n, 0, &count)
+}
+
+// parseStepDepth parses one step; count tracks steps across nested blocks.
+func parseStepDepth(n *yaml.Node, depth int, count *int) (step, error) {
 	var s step
-	f, err := fields(n, "name", "timeout", "save", "open", "click", "fill", "type", "press", "eval", "get", "wait", "screenshot", "snapshot", "tab", "expect", "find", "cookies", "storage", "upload", "console", "errors", "network", "downloads", "dialogs", "dialog", "set")
+	if *count++; *count > 1000 {
+		return s, errors.New("flows may contain at most 1000 steps including nested steps")
+	}
+	f, err := fields(n, "name", "timeout", "save", "open", "click", "fill", "type", "press", "eval", "get", "wait", "screenshot", "snapshot", "tab", "expect", "find", "cookies", "storage", "upload", "console", "errors", "network", "downloads", "dialogs", "dialog", "set", "if", "then", "else", "repeat", "each", "route", "unroute", "request")
 	if err != nil {
 		return s, err
+	}
+	branches := map[string]*yaml.Node{}
+	for _, key := range []string{"then", "else"} {
+		if n := f[key]; n != nil {
+			if f["if"] == nil {
+				return s, fmt.Errorf("%s is only valid with if", key)
+			}
+			branches[key] = n
+			delete(f, key)
+		}
 	}
 	for _, key := range []string{"name", "timeout", "save"} {
 		if n := f[key]; n != nil {
@@ -273,6 +294,13 @@ func parseStep(n *yaml.Node) (step, error) {
 		}
 	case "expect":
 		s.value, err = parseExpect(payload)
+	case "if", "repeat", "each":
+		err = parseBlock(&s, payload, branches, depth, count)
+		if err == nil && s.save != "" {
+			err = errors.New("save is not supported on blocks")
+		}
+	case "route", "unroute", "request":
+		s.value, err = parseNetworkStep(s.action, payload)
 	case "wait", "find", "cookies", "storage", "upload", "console", "errors", "network", "downloads", "dialogs", "dialog", "set":
 		s.value, err = parseNative(s.action, payload)
 	}
@@ -280,7 +308,7 @@ func parseStep(n *yaml.Node) (step, error) {
 		return s, fmt.Errorf("%s: %w", s.action, err)
 	}
 	if s.timeout == nil {
-		if s.action == "expect" {
+		if s.action == "expect" || isBlock(s.action) {
 			s.timeout = "10s"
 		} else {
 			s.timeout = "15s"

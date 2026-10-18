@@ -86,8 +86,11 @@ meta tag, mobile pages may have a wider layout viewport than the device width.
 Read `screen.width` as well as `innerWidth` when diagnosing that distinction.
 
 Use [YAML/JSON flows](flows.md) for many actions in one invocation and optional
-E2E assertions. `wok run FILE` emits a report; failure screenshots use an artifact
-directory. Store stable selectors in flows, rather than refs from previous runs.
+E2E assertions. Flows support `if`/`then`/`else`, `repeat` (`times`, `while`,
+`until`), `each` loops, and `route`/`unroute`/`request` steps for network mocks,
+so branching logic need not move into `eval`. `wok run FILE` emits a report;
+failure screenshots use an artifact directory. Store stable selectors in flows,
+rather than refs from previous runs.
 
 ## Read results
 
@@ -263,7 +266,7 @@ profile running unless the task requests its closure.
 | `sessionstorage-list\|get\|set\|delete\|clear` | Inspect or mutate `sessionStorage` on the active origin |
 | `requests` / `network` | List recorded network requests with 1-based `index` |
 | `request <index>` / `request-headers <index>` / `request-body <index>` / `response-headers <index>` / `response-body <index>` | Inspect recorded request/response headers and bodies |
-| `route <pattern> [--status N] [--body T\|--body-file F] [--content-type C] [--header K:V] [--abort]` | Mock or block matching network requests |
+| `route <pattern> [--status N] [--body T\|--body-file F] [--content-type C] [--header K:V] [--times N] [--abort]` | Mock or block matching network requests. Globs match the full URL (`**/api/**`); newest route wins; `--times` expires a route after N hits |
 | `route-list` / `unroute [pattern]` | List or remove network routes |
 | `network-state-set online\|offline` | Toggle offline network emulation |
 | `console [min-level]` / `errors` / `downloads` / `dialogs` | Read recorded console logs, uncaught errors, downloads, or dialogs |

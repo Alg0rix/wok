@@ -51,10 +51,11 @@ an exact page for actions. Default total timeout is five minutes; override with
 `--timeout`. Step timeouts are 15 seconds for actions and 10 seconds for
 assertions unless a step supplies `timeout`.
 
-Files are limited to 1 MiB and 1,000 steps. Unknown fields, extra YAML documents,
-and steps with more than one action fail validation. This is a sequence format:
-there are no shell commands, loops, branches, or automatic retries of mutating
-actions. Run only flows you intend to execute; `eval` can execute page JavaScript.
+Files are limited to 1 MiB and 1,000 steps, counting steps nested in blocks.
+Unknown fields, extra YAML documents, and steps with more than one action fail
+validation. Flows can branch and loop (see [control flow](#control-flow)), but
+there are no shell commands or automatic retries of mutating actions. Run only
+flows you intend to execute; `eval` can execute page JavaScript.
 
 ## Actions
 
@@ -77,6 +78,95 @@ Each step contains exactly one action, with optional `name`, `timeout`, and
 | Open tab | `tab: {new: "https://example.org"}` |
 | Select tab | `tab: {select: "${details.targetId}"}` |
 | Close tab | `tab: {close: "${details.targetId}"}` |
+| Mock a request | `route: {pattern: "**/api/**", status: 200, body: "{}"}` |
+| Remove routes | `unroute: "**/api/**"` or `unroute: true` (all) |
+| List requests | `network: true` |
+| Inspect a request | `request: 3` (index from `network`) |
+| Branch | `if: {selector: "#banner"}` with `then:` / `else:` steps |
+| Loop | `repeat: {times: 3, steps: [...]}`, `repeat: {until: {...}, steps: [...]}` |
+| Iterate | `each: {items: [a, b], steps: [...]}` |
+
+## Control flow
+
+`if`, `repeat`, and `each` contain nested steps. Their conditions use the same
+fields as [`expect`](#assertions) (`selector`, `text`, `contains`, `value`,
+`count`, `visible`, `url`, `js`) but are checked once, without polling. Add an
+`expect` or `wait` step first when the page needs time to settle.
+
+```yaml
+steps:
+  - if: {selector: ".cookie-banner", visible: true}
+    then:
+      - click: ".cookie-banner .accept"
+    else:
+      - eval: console.log('no banner')
+
+  - repeat:
+      times: 3                 # or while: {...} / until: {...}
+      as: page                 # optional, default "loop"
+      steps:
+        - click: ".next"
+        - expect: {js: "document.querySelectorAll('.row').length >= ${page.number} * 10"}
+
+  - repeat:
+      until: {selector: ".done"}
+      max: 20                  # default 100; reaching it fails the step
+      steps:
+        - click: "#load-more"
+
+  - each:
+      items: [first follow-up, second]
+      as: msg
+      steps:
+        - fill: {selector: ".chat-input", value: "${msg.item}"}
+        - click: ".chat-send"
+```
+
+`while` checks before each iteration and `until` after it. Inside a loop,
+`${NAME.index}` is the 0-based iteration, `${NAME.number}` is 1-based, and in
+`each` `${NAME.item}` is the current item (object items expose fields as
+`${NAME.item.FIELD}`). `items` is a YAML list or a string that resolves to a
+JSON array, such as a saved result: `items: "${rows}"`. Loops run at most 10,000
+iterations and blocks nest at most 8 levels. `save` is not allowed on a block
+itself; steps inside a block can save values that later steps use.
+
+Block steps appear in the report with `{"matched": BOOL}` or
+`{"iterations": N}`. Nested steps carry their top-level `index` and a `path`
+such as `3.then.1` or `4[2].1` (step 4, iteration 2, nested step 1). Error
+messages use the same path.
+
+## Network mocking
+
+`route` mocks or aborts requests for the profile. Fields: `pattern` (required),
+`status`, `body` or `bodyFile`, `contentType`, `headers` (a name→value map),
+`times`, and `abort`. Patterns are globs matched against the full URL: `**`
+matches anything and `*` matches anything except `/`. Use `**/api/**`;
+`*/api/*` cannot match `http://host/api/x` and is rejected. A pattern without
+`*` matches as a substring.
+
+The newest matching route wins. A route with `times: N` handles N requests and
+then lets older routes or the network answer, so stacked routes give per-request
+responses:
+
+```yaml
+steps:
+  - unroute: true
+  - route: {pattern: "**/api/**", status: 200, body: "{}"}
+  - route: {pattern: "**/api/chat/stream", status: 500, times: 1}   # first stream fails
+  - route:
+      pattern: "**/api/chat/stream"
+      times: 1
+      contentType: text/event-stream
+      body: "data: {\"delta\":\"hi\"}\n\n"
+```
+
+Routes persist with the profile until `unroute` (the CLI `route-list` shows
+each route's `hits`). Route bodies are sent whole; when a test needs streaming
+timing or responses computed from the request, run your own test server and let
+the flow drive the browser against it. `network: true` lists requests with an
+`index`; `request: INDEX` returns that request's headers and bodies, for example
+to check a POST payload. Saved arrays such as `network` results are available
+as `${net.0.url}`, `${net.length}`, or as `each` items.
 
 Use stable CSS selectors for stored flows. Snapshot refs change and belong to
 a specific document/target; do not hardcode refs from an earlier run. Actions
@@ -106,7 +196,8 @@ steps:
     save: title
 ```
 
-Captured object fields are available through dotted names. Captured values are
+Captured object fields are available through dotted names; captured arrays
+expose `${name.0}`, `${name.length}`, and the JSON text as `${name}`. Captured values are
 text substitution; for JavaScript values requiring escaping, prefer an explicit
 assertion such as `expect.text` rather than interpolating values into code.
 
