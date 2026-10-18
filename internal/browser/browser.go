@@ -79,6 +79,7 @@ func (p *Page) Call(ctx context.Context, method string, params, result any) erro
 
 type remoteResult struct {
 	Result struct {
+		Type        string `json:"type"`
 		Value       any    `json:"value"`
 		ObjectID    string `json:"objectId"`
 		Description string `json:"description"`
@@ -92,12 +93,27 @@ func remoteError(r remoteResult) error {
 	}
 	return nil
 }
+// Eval evaluates an expression and returns its JSON value. When the
+// expression is a function, such as '() => ...', Eval calls it and returns
+// the awaited result instead.
 func (p *Page) Eval(ctx context.Context, expression string) (any, error) {
 	var r remoteResult
-	if err := p.Call(ctx, "Runtime.evaluate", map[string]any{"expression": expression, "returnByValue": true, "awaitPromise": true}, &r); err != nil {
+	if err := p.Call(ctx, "Runtime.evaluate", map[string]any{"expression": expression, "awaitPromise": true}, &r); err != nil {
 		return nil, err
 	}
-	return r.Result.Value, remoteError(r)
+	if err := remoteError(r); err != nil || r.Result.ObjectID == "" {
+		return r.Result.Value, err
+	}
+	defer p.Call(context.WithoutCancel(ctx), "Runtime.releaseObject", map[string]any{"objectId": r.Result.ObjectID}, nil)
+	body := "function(){return this}"
+	if r.Result.Type == "function" {
+		body = "function(){return this()}"
+	}
+	var v remoteResult
+	if err := p.Call(ctx, "Runtime.callFunctionOn", map[string]any{"objectId": r.Result.ObjectID, "functionDeclaration": body, "returnByValue": true, "awaitPromise": true}, &v); err != nil {
+		return nil, err
+	}
+	return v.Result.Value, remoteError(v)
 }
 func normalizeURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)

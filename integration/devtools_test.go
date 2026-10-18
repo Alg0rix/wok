@@ -128,6 +128,9 @@ func TestPlaywrightCLICommandSet(t *testing.T) {
 	if out := run("dev", "eval", "innerWidth"); out != "900" {
 		t.Fatal(out)
 	}
+	if out := run("dev", "eval", "async () => { await null; return {w: innerWidth} }"); out != `{"w":900}` {
+		t.Fatalf("eval should call a function expression: %s", out)
+	}
 
 	// Element interactions
 	run("dev", "hover", "#hover-box")
