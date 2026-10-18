@@ -90,6 +90,9 @@ func Run(ctx context.Context, source []byte, opts Options, exec Executor) (repor
 		if opts.TargetID != "" {
 			prefix = append(prefix, "--tab", opts.TargetID)
 		}
+		if len(args) > 2 && args[0] == "--frame" {
+			prefix, args = append(prefix, args[:2]...), args[2:]
+		}
 		prefix = append(prefix, "--timeout", timeout.String(), "--json", "--")
 		return append(prefix, args...)
 	}
@@ -228,7 +231,7 @@ func validateAction(action string, value any) error {
 		}
 	case "expect":
 		m := value.(map[string]any)
-		for _, k := range []string{"selector", "js"} {
+		for _, k := range []string{"selector", "js", "frame"} {
 			if v, ok := m[k]; ok {
 				if err := require(v, k); err != nil {
 					return err

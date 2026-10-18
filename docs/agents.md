@@ -295,7 +295,7 @@ profile running unless the task requests its closure.
 
 ## Limits and protocol escape hatch
 
-CSS element actions target the main document unless chained into a frame with ` >> ` or scoped with `--frame`; navigation and tab commands always act on the tab. Flow `expect` selectors and `wait --text`/`--fn` read the main document only (use `--frame` for the CLI forms). The snapshot is a flat accessibility listing (`snapshot [target]` scopes to a subtree). Use a full browser screenshot when a task depends on appearance.
+CSS element actions target the main document unless chained into a frame with ` >> ` or scoped with `--frame`; navigation and tab commands always act on the tab. Flow conditions accept ` >> ` chains and a `frame` field; `wait --text`/`--fn` read the main document unless `--frame` is set. The snapshot is a flat accessibility listing (`snapshot [target]` scopes to a subtree). Use a full browser screenshot when a task depends on appearance.
 
 For a supported CDP operation that has no convenience command:
 

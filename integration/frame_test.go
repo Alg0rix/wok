@@ -149,6 +149,12 @@ steps:
   - open: "`+top.URL+`"
   - click: "#cross >> #b"
   - fill: {selector: "#cross >> #nested >> #i", value: "from-flow"}
+  - expect: {selector: "#cross >> #b", text: "cross clicked"}
+  - expect: {frame: "#cross >> #nested", js: "window.who === 'inner'"}
+  - if: {selector: "#same >> #b", visible: true}
+    then:
+      - click: "#same >> #b"
+  - expect: {selector: "#same >> #b", text: "inner clicked"}
 `), 0600)
 			if b := run("run", flowFile); !strings.Contains(b, `"ok":true`) {
 				t.Fatal(b)

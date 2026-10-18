@@ -279,3 +279,41 @@ func TestLoopScopingRedactionAndPrecision(t *testing.T) {
 		t.Fatalf("loop variable leaked past its loop: %v", err)
 	}
 }
+
+func TestConditionsInFrames(t *testing.T) {
+	s := &stub{run: func(_ context.Context, args []string) (json.RawMessage, error) {
+		return json.RawMessage(`true`), nil
+	}}
+	report, err := Run(context.Background(), []byte(`steps:
+  - expect: {selector: '#pay >> #inner >> button', text: Pay}
+  - if: {frame: '#pay', js: 'window.ready'}
+    then: [{click: '#pay >> button'}]
+  - expect: {frame: '#pay', selector: '#inner >> #ok'}
+`), Options{}, s.exec)
+	if err != nil || !report.OK {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	frames := []string{}
+	for _, c := range s.calls {
+		head, rest, _ := strings.Cut(strings.Join(c.args, " "), " -- ")
+		if !strings.HasPrefix(rest, "eval ") {
+			continue
+		}
+		if i := strings.Index(head, "--frame "); i >= 0 {
+			frames = append(frames, strings.SplitN(head[i+8:], " --", 2)[0])
+		} else {
+			frames = append(frames, "")
+		}
+		if strings.Contains(rest, ">>") {
+			t.Fatalf("chain leaked into eval: %s", rest)
+		}
+	}
+	want := []string{"#pay >> #inner", "#pay", "#pay >> #inner"}
+	if !reflect.DeepEqual(frames, want) {
+		t.Fatalf("frames=%q want %q", frames, want)
+	}
+	_, err = Run(context.Background(), []byte(`steps: [{expect: {frame: '#pay'}}]`), Options{}, (&stub{}).exec)
+	if err == nil || !strings.Contains(err.Error(), "expect requires a condition") {
+		t.Fatalf("frame-only err=%v", err)
+	}
+}

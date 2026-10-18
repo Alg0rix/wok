@@ -14,7 +14,7 @@ const (
 	maxRepeat         = 10000
 	defaultRepeatMax  = 100
 	defaultLoopName   = "loop"
-	conditionFieldSet = "selector text contains value count visible url js"
+	conditionFieldSet = "selector text contains value count visible url js frame"
 )
 
 // block holds the nested steps of an if, repeat, or each step. The step's

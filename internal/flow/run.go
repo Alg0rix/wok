@@ -199,7 +199,7 @@ func (r *runner) step(ctx context.Context, s *step, index int, label string) (js
 func (r *runner) check(ctx context.Context, condition any, timeout time.Duration) (bool, error) {
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	result, err := r.exec(checkCtx, []string{"eval", expectExpression(condition.(map[string]any))}, timeout)
+	result, err := r.exec(checkCtx, conditionArgs(condition.(map[string]any)), timeout)
 	if err != nil {
 		return false, err
 	}

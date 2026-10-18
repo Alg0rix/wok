@@ -90,7 +90,7 @@ Each step contains exactly one action, with optional `name`, `timeout`, and
 
 `if`, `repeat`, and `each` contain nested steps. Their conditions use the same
 fields as [`expect`](#assertions) (`selector`, `text`, `contains`, `value`,
-`count`, `visible`, `url`, `js`) but are checked once, without polling. Add an
+`count`, `visible`, `url`, `js`, `frame`) but are checked once, without polling. Add an
 `expect` or `wait` step first when the page needs time to settle.
 
 ```yaml
@@ -226,7 +226,16 @@ A selector alone checks existence. `count: 0` checks absence. `visible` checks
 layout/style visibility, not occlusion by another element. Text/value/count/
 visibility predicates require a selector. Conditions in one `expect` combine
 with AND. `js` must return a boolean; invalid JavaScript/selectors fail directly.
-Assertions and element selectors currently address the main document.
+Selectors and assertions address the main document unless they reach into an
+iframe. Chain the iframe and the element with ` >> `, as in element actions, or
+set `frame` to run every condition, including `url` and `js`, inside the frame:
+
+```yaml
+steps:
+  - click: "#checkout >> button[type=submit]"
+  - expect: {selector: "#checkout >> .status", text: "Paid"}
+  - expect: {frame: "#checkout", js: "window.paid === true"}
+```
 
 ## Results and failure artifacts
 

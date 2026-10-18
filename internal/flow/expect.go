@@ -52,15 +52,50 @@ func expectExpression(m map[string]any) string {
 	b.WriteString("return " + strings.Join(conditions, "&&") + ";})()")
 	return b.String()
 }
+
+// frameSeparator matches the CLI's iframe selector chain separator.
+const frameSeparator = " >> "
+
+// conditionArgs builds the eval command for a condition. A frame field, or
+// the iframe part of a "frame >> selector" chain, scopes the eval to that
+// iframe.
+func conditionArgs(m map[string]any) []string {
+	frame, _ := m["frame"].(string)
+	if selector, ok := m["selector"].(string); ok {
+		if i := strings.LastIndex(selector, frameSeparator); i >= 0 {
+			outer := strings.TrimSpace(selector[:i])
+			if frame != "" {
+				outer = frame + frameSeparator + outer
+			}
+			m = copyWith(m, "selector", strings.TrimSpace(selector[i+len(frameSeparator):]))
+			frame = outer
+		}
+	}
+	args := []string{"eval", expectExpression(m)}
+	if frame != "" {
+		args = append([]string{"--frame", frame}, args...)
+	}
+	return args
+}
+
+func copyWith(m map[string]any, key string, value any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	out[key] = value
+	return out
+}
+
 func assert(ctx context.Context, conditions map[string]any, exec Executor) (json.RawMessage, error) {
-	expression := expectExpression(conditions)
+	args := conditionArgs(conditions)
 	ticker := time.NewTicker(75 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		result, err := exec(ctx, []string{"eval", expression})
+		result, err := exec(ctx, args)
 		if err != nil {
 			return nil, err
 		}

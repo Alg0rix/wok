@@ -317,11 +317,11 @@ func parseStepDepth(n *yaml.Node, depth int, count *int) (step, error) {
 	return s, nil
 }
 func parseExpect(n *yaml.Node) (map[string]any, error) {
-	f, err := fields(n, "selector", "text", "contains", "value", "count", "visible", "url", "js")
+	f, err := fields(n, "selector", "text", "contains", "value", "count", "visible", "url", "js", "frame")
 	if err != nil {
 		return nil, err
 	}
-	if len(f) == 0 {
+	if len(f) == 0 || len(f) == 1 && f["frame"] != nil {
 		return nil, errors.New("expect requires a condition")
 	}
 	out := map[string]any{}
