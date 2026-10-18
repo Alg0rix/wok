@@ -189,17 +189,93 @@ directory as a routine recovery step. `stop` preserves profile data on disk.
 Stop profiles created for temporary tests when done; leave an existing shared
 profile running unless the task requests its closure.
 
-## Extended actions, network routing, and DevTools
+## Complete command reference
 
-Wok also supports the full interactive and DevTools command set (`-s=NAME` is a shorthand for `--profile NAME`, and `--raw` prints string results without JSON quotes):
+`-s=NAME` and `--session NAME` are shorthands for `--profile NAME`. Add `--raw` to print string outputs without JSON quotes, or `--help COMMAND` to inspect any command's usage.
 
-- **Element & pointer**: `dblclick`, `hover`, `drag`, `drop`, `select`, `check`, `uncheck`, `upload`, `mousemove`, `mousedown`, `mouseup`, `mousewheel`, `keydown`, `keyup`, `generate-locator`, `highlight`
-- **Navigation & output**: `goto`, `go-back`, `go-forward`, `reload`, `resize`, `screenshot [file] [target]`, `pdf [file]`
-- **Storage & state**: `state-save`, `state-load`, `cookie-list|get|set|delete|clear`, `localstorage-list|get|set|delete|clear`, `sessionstorage-list|get|set|delete|clear`, `dialog-accept`, `dialog-dismiss`, `delete-data`
-- **Network & DevTools**: `requests`, `request`, `request-headers`, `request-body`, `response-headers`, `response-body`, `route`, `route-list`, `unroute`, `network-state-set`, `console [min-level]`, `run-code`, `recording-start|stop`, `tracing-start|stop`, `video-start|stop|chapter`, `video-show-actions|video-hide-actions`, `pause-at`, `resume`, `step-over`
-- **Sessions**: `open [url]`, `attach`, `detach`, `close`, `list`, `close-all`, `kill-all`, `show`, `install`, `install-browser`
+### Browser sessions & lifecycle
 
-Run `wok --help COMMAND` for any command's usage.
+| Command | Description |
+|---|---|
+| `start` | Start or reuse the profile browser and resident `/render` controller |
+| `open [url]` | Start the profile browser when called with no URL, or navigate to `url` |
+| `status` | Show `profile`, `endpoint`, `pid`, `browser`, `targetId`, `renderUrl`, `authRequired` |
+| `stop` / `close` | Stop the profile browser and preserve profile storage on disk |
+| `delete-data` | Stop the profile browser and wipe its browser directory and state |
+| `list` / `profile list` | List known profiles and whether each is running |
+| `close-all` | Gracefully stop all running managed profiles |
+| `kill-all` | Forcefully terminate all managed profile browser processes |
+| `attach [name\|url]` | Attach this profile to another profile, port, or CDP endpoint (or inspect attachment) |
+| `detach` | Detach this profile from an external CDP endpoint |
+
+### Core page & element actions
+
+| Command | Description |
+|---|---|
+| `goto <url>` / `open <url>` | Navigate the active tab (`https://` assumed when scheme is omitted) |
+| `snapshot [-i] [target]` | Accessibility tree (`-i` interactive only; `target` scopes to an element subtree; `--json` for JSON) |
+| `find <text>` | Find an element by visible text and return its `@eN` ref |
+| `find role\|text\|css <val> [--nth N]` | Find an element by accessible role, visible text, or CSS selector |
+| `click <target> [button]` | Click an unobscured, enabled element (`left`, `right`, or `middle`) |
+| `dblclick <target> [button]` | Double-click an unobscured, enabled element |
+| `hover <target>` | Move pointer over `<target>` |
+| `fill <target> <text>` | Replace editable contents of `<target>` |
+| `type <text>` | Insert text into the focused element |
+| `select <target> <val...>` | Select `<select>` option(s) by value or visible label |
+| `check <target>` / `uncheck <target>` | Check or uncheck a checkbox, radio button, or ARIA switch |
+| `drag <start> <end>` | Drag from `<start>` to `<end>` (pointer + HTML5 `DataTransfer`) |
+| `drop <target> <files...\|--text text>` | Drop local files or `text/plain` onto `<target>` |
+| `upload <target> <files...>` | Set local files on an `<input type="file">` |
+| `get text\|title\|url [selector]` | Read page/element text, document title, or URL |
+| `get attr <selector> <name>` | Read an element attribute |
+| `eval <func\|expr> [target]` | Evaluate JS on the page, or call `el => ...` on `<target>` |
+| `wait <selector> [--state S]` | Wait for `attached`, `detached`, `visible`, or `hidden` |
+| `wait --text T\|--url U\|--fn JS\|--load\|--network-idle\|--download` | Wait for text, URL, JS condition, load, network idle, or download |
+| `dialog [accept\|dismiss [prompt]]` | Inspect or set policy for future `alert`/`confirm`/`prompt` dialogs |
+| `dialog-accept [prompt]` / `dialog-dismiss` | Accept or dismiss future JavaScript dialogs |
+| `resize <w> <h>` / `viewport [w h] [--mobile] [--dpr N]\|reset` | Set or reset persistent viewport and mobile emulation |
+| `set viewport\|device\|media\|offline [args]` | Apply device presets, color scheme (`dark`/`light`/`no-preference`), or `offline on\|off` |
+
+### Navigation, keyboard, mouse, save as & tabs
+
+| Command | Description |
+|---|---|
+| `go-back` / `go-forward` / `reload` | Navigate session history or reload the active tab |
+| `press <key>` | Press and release a key or shortcut (`Enter`, `Control+a`, `Meta+a`, `Shift+Tab`) |
+| `keydown <key>` / `keyup <key>` | Dispatch individual `keyDown` or `keyUp` events |
+| `mousemove <x> <y>` | Move pointer to CSS pixel coordinates `(x, y)` |
+| `mousedown [button]` / `mouseup [button]` | Press or release mouse button at current pointer coordinates |
+| `mousewheel <dx> <dy>` | Scroll wheel by `(dx, dy)` at current pointer coordinates |
+| `screenshot [file] [target]` | Save PNG of the viewport or `<target>` element |
+| `pdf [file]` | Export the active page as PDF |
+| `tab-list` / `tab list` | List open browser tabs |
+| `tab-new [url]` / `tab new [url]` | Open and select a new tab |
+| `tab-select <index\|id>` / `tab select <index\|id>` | Select a tab by zero-based index or `targetId` |
+| `tab-close [index\|id]` / `tab close [index\|id]` | Close a tab by index or `targetId` |
+
+### Storage, network & DevTools
+
+| Command | Description |
+|---|---|
+| `state-save [file]` / `state-load <file>` | Save or restore cookies and per-origin `localStorage` |
+| `cookie-list` / `cookie-get <name>` / `cookie-set <name> <val>` / `cookie-delete <name>` / `cookie-clear` | Inspect or mutate browser cookies |
+| `localstorage-list\|get\|set\|delete\|clear` | Inspect or mutate `localStorage` on the active origin |
+| `sessionstorage-list\|get\|set\|delete\|clear` | Inspect or mutate `sessionStorage` on the active origin |
+| `requests` / `network` | List recorded network requests with 1-based `index` |
+| `request <index>` / `request-headers <index>` / `request-body <index>` / `response-headers <index>` / `response-body <index>` | Inspect recorded request/response headers and bodies |
+| `route <pattern> [--status N] [--body T\|--body-file F] [--content-type C] [--header K:V] [--abort]` | Mock or block matching network requests |
+| `route-list` / `unroute [pattern]` | List or remove network routes |
+| `network-state-set online\|offline` | Toggle offline network emulation |
+| `console [min-level]` / `errors` / `downloads` / `dialogs` | Read recorded console logs, uncaught errors, downloads, or dialogs |
+| `run-code [code]` / `exec <file\|->` / `run <file\|->` | Execute command batches or YAML/JSON flows |
+| `recording-start` / `recording-stop` | Record user actions in the page and emit a replayable script |
+| `tracing-start [categories]` / `tracing-stop [file]` | Capture a Chromium trace JSON file |
+| `video-start [file]` / `video-stop` / `video-chapter <title>` | Record screencast video (`.avi` built-in; `.mp4`/`.webm` via `ffmpeg`) |
+| `video-show-actions` / `video-hide-actions` | Toggle on-page visual callouts and outlines during CLI actions |
+| `show` / `render` / `terminal [--fps N]` | Open the live HTTP viewer URL or ANSI terminal viewer |
+| `pause-at <loc\|next\|--clear>` / `resume` / `step-over` | Control the JavaScript debugger |
+| `generate-locator <target>` / `highlight <target> [--hide]` | Generate a unique locator or draw/hide an element highlight |
+| `install [skills]` / `skills list\|show\|install` / `install-browser [browser]` / `browser install` | Install the bundled agent skill or cached Chromium headless shell |
 
 ## Limits and protocol escape hatch
 

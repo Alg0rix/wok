@@ -187,10 +187,71 @@ wok cdp Runtime.evaluate '{"expression":"1+1","returnByValue":true}'
 wok --browser-level cdp Browser.getVersion
 ```
 
-Results use JSON on stdout; default snapshots use compact tab-separated text.
-Errors are JSON on stderr and return a nonzero exit code. Use `wok help` for
-all options. Options may occur before or after the command. `--` ends option
-parsing, useful when a literal value starts with an option name.
+Results use JSON on stdout (`--raw` prints string results without JSON quotes); default snapshots use compact tab-separated text.
+Errors are JSON on stderr and return a nonzero exit code. Use `wok --help` or `wok --help COMMAND` for command usage. Options may occur before or after the command. `--` ends option parsing, useful when a literal value starts with an option name.
+
+```text
+Core
+open [url]                  attach [name]               close
+detach                      goto <url>                  type <text>
+click <target> [button]     dblclick <target> [button]  fill <target> <text>
+drag <start> <end>          drop <target>               hover <target>
+select <target> <val>       upload <files...>           check <target>
+uncheck <target>            snapshot [target]           find [text]
+eval <func> [target]        dialog-accept [prompt]      dialog-dismiss
+resize <w> <h>              delete-data
+
+Navigation
+go-back                     go-forward                  reload
+
+Keyboard
+press <key>                 keydown <key>               keyup <key>
+
+Mouse
+mousemove <x> <y>           mousedown [button]          mouseup [button]
+mousewheel <dx> <dy>
+
+Save as
+screenshot [target]         pdf
+
+Tabs
+tab-list                    tab-new [url]               tab-close [index]
+tab-select <index>
+
+Storage
+state-load <file>           state-save [file]
+cookie-list                 cookie-get <name>           cookie-set <name> <val>
+cookie-delete <name>        cookie-clear
+localstorage-list           localstorage-get <key>      localstorage-set <k> <v>
+localstorage-delete <key>   localstorage-clear
+sessionstorage-list         sessionstorage-get <key>    sessionstorage-set <k> <v>
+sessionstorage-delete <k>   sessionstorage-clear
+
+Network
+requests                    request <index>             request-headers <index>
+request-body <index>        response-headers <index>    response-body <index>
+route <pattern>             route-list                  unroute [pattern]
+network-state-set <state>
+
+DevTools
+console [min-level]         run-code [code]             recording-start
+recording-stop              tracing-start               tracing-stop
+video-start [file]          video-stop                  video-chapter <title>
+video-show-actions          video-hide-actions          show
+pause-at <location>         resume                      step-over
+generate-locator <target>   highlight [target]
+
+Install
+install                     install-browser [browser]
+
+Browser sessions
+-s=<name> <cmd>             list                        close-all
+kill-all
+
+Global options
+--help [command]            --json                      --raw
+--version
+```
 
 Refs refer to backend DOM nodes and the document/target that produced them.
 They survive CLI exits, fail on navigation/removal, and are refreshed by another
@@ -199,10 +260,7 @@ an old ref. Use CSS selectors for stable automation; ambiguous selectors fail.
 Clicks scroll into view and reject disabled/covered elements before dispatching
 pointer input. `fill` sends real input events, including for an empty value.
 
-CSS selectors and input actions currently target the main document. Iframe
-traversal, shadow-root selectors, file uploads, download management, and a full
-Playwright-style locator/actionability layer are outside this version. Snapshots
-are a flat accessibility-node listing, not a hierarchical DOM dump.
+See [docs/agents.md](docs/agents.md) and [skills/wok/references/commands.md](skills/wok/references/commands.md) for the complete reference of every command and option.
 
 ## Viewport and mobile
 
@@ -295,12 +353,8 @@ curl -X POST "$RENDER_URL/render/input?tab=$TARGET" \
   -d '{"type":"text","text":"hello"}'
 ```
 
-The service binds only to loopback and rejects untrusted Host/Origin headers.
-It is intended for local use or a trusted tunnel that rewrites Host/Origin to
-the upstream local origin. Cross-origin embedding and arbitrary public listeners
-are not supported. Treat CDP and the viewer as browser-control endpoints; do not
-publish them directly to an untrusted network. This version does not provide
-a bearer-authenticated remote CDP proxy or MCP API.
+By default the service binds to loopback and rejects untrusted Host/Origin headers.
+Use `--auth-token TOKEN|auto` and `--embed-origin ORIGIN` when exposing the controller or embedding the viewer across origins; the controller also serves an MCP JSON-RPC endpoint at `POST /mcp` and CDP discovery at `/json/version`. Treat CDP and the viewer as browser-control endpoints; do not publish them to an untrusted network without authentication.
 
 ## Tests and benchmarks
 
