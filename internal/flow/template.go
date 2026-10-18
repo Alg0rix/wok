@@ -56,10 +56,16 @@ func (v *variables) compile(s string, saved map[string]bool) (template, error) {
 			out = append(out, part{text: s})
 			break
 		}
+		if strings.HasSuffix(before, "$") {
+			// $${...} is a literal ${...}, e.g. a JavaScript template literal.
+			out = append(out, part{text: before[:len(before)-1] + "${"})
+			s = after
+			continue
+		}
 		out = append(out, part{text: before})
 		name, rest, closed := strings.Cut(after, "}")
 		if !closed || !variableName.MatchString(name) {
-			return nil, errors.New("invalid ${NAME} variable reference")
+			return nil, errors.New("invalid ${NAME} variable reference (write $${...} for a literal ${...})")
 		}
 		prefix, _, _ := strings.Cut(name, ".")
 		if saved[prefix] {
@@ -67,7 +73,7 @@ func (v *variables) compile(s string, saved map[string]bool) (template, error) {
 		} else if value, ok := v.lookup(name); ok {
 			out = append(out, part{text: value})
 		} else {
-			return nil, fmt.Errorf("missing variable %s", name)
+			return nil, fmt.Errorf("missing variable %s (write $${%s} for a literal ${%s})", name, name, name)
 		}
 		s = rest
 	}

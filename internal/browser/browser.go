@@ -121,9 +121,36 @@ type remoteResult struct {
 
 func remoteError(r remoteResult) error {
 	if len(r.Exception) > 0 && string(r.Exception) != "null" {
-		return fmt.Errorf("browser JavaScript: %s", r.Exception)
+		return fmt.Errorf("browser JavaScript: %s", exceptionMessage(r.Exception))
 	}
 	return nil
+}
+
+// exceptionMessage reduces CDP exceptionDetails to the thrown error's first
+// line, such as "Error: expected 2, got 0", falling back to the raw payload.
+func exceptionMessage(raw json.RawMessage) string {
+	var d struct {
+		Text      string `json:"text"`
+		Exception struct {
+			Description string `json:"description"`
+			Value       any    `json:"value"`
+		} `json:"exception"`
+	}
+	if json.Unmarshal(raw, &d) != nil {
+		return string(raw)
+	}
+	message := d.Exception.Description
+	if message == "" && d.Exception.Value != nil {
+		message = fmt.Sprint(d.Exception.Value)
+	}
+	if message == "" {
+		message = d.Text
+	}
+	if message == "" {
+		return string(raw)
+	}
+	message, _, _ = strings.Cut(message, "\n")
+	return message
 }
 
 // Eval evaluates an expression and returns its JSON value. When the

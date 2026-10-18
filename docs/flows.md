@@ -181,7 +181,9 @@ profile while it runs.
 ## Variables and captured results
 
 `${NAME}` reads `--var NAME=VALUE` first, then an environment variable. Missing
-variables fail rather than becoming empty strings. Variables do not execute shell
+variables fail rather than becoming empty strings. Write `$${...}` for a literal
+`${...}`, such as a JavaScript template literal inside `eval` or `js`:
+`` eval: 'document.title = `n=$${n}`' ``. Variables do not execute shell
 expansions. Prefer environment variables for secrets so values do not appear in
 the process command line; reports do not list command arguments. Page results,
 errors, and screenshots may still include page data, so keep artifacts private.
@@ -208,7 +210,11 @@ assertion such as `expect.text` rather than interpolating values into code.
 ## Assertions
 
 `expect` polls every 75 ms until its conditions pass or its timeout expires.
-Mutating actions are not retried. A failed assertion stops the flow.
+Mutating actions are not retried. A failed assertion stops the flow; its error
+lists the conditions that did not hold with the values last seen on the page,
+for example `expect timed out: text: want "3 items", got "2 items"`. An `eval`
+step that throws fails with the thrown error, such as
+`browser JavaScript: Error: expected 2, got 0`.
 
 ```yaml
 steps:

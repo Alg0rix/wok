@@ -847,6 +847,18 @@ func rawCDP(ctx context.Context, out io.Writer, client *cdp.Client, sid string, 
 	}
 	return emit(out, result)
 }
+
+// profileHasData reports whether a profile directory holds browser data or
+// state; delete-data leaves only the lock file behind.
+func profileHasData(dir string) bool {
+	for _, name := range []string{"state.json", "browser", "attach"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func listProfiles(ctx context.Context, out io.Writer) error {
 	base, err := session.Open("", "default")
 	if err != nil {
@@ -862,7 +874,7 @@ func listProfiles(ctx context.Context, out io.Writer) error {
 			continue
 		}
 		store, e := session.Open("", entry.Name())
-		if e != nil {
+		if e != nil || !profileHasData(store.Dir) {
 			continue
 		}
 		st, e := store.Load()

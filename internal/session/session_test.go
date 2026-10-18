@@ -106,3 +106,23 @@ func TestStopTimeoutPreservesLiveState(t *testing.T) {
 		t.Fatalf("live state cleared: %+v %v", got, err)
 	}
 }
+
+func TestStartupHintSandbox(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "browser.log")
+	os.WriteFile(log, []byte("old run: No usable sandbox!\n"), 0600)
+	info, _ := os.Stat(log)
+	if hint := startupHint(log, info.Size(), false, "chrome"); hint != "" {
+		t.Fatalf("earlier runs leaked into hint: %q", hint)
+	}
+	f, _ := os.OpenFile(log, os.O_APPEND|os.O_WRONLY, 0600)
+	f.WriteString("[1:1:FATAL:zygote_host_impl_linux.cc(128)] No usable sandbox! ...\n")
+	f.Close()
+	hint := startupHint(log, info.Size(), false, "chrome")
+	if !strings.Contains(hint, "sandbox is unavailable") || !strings.Contains(hint, "--browser") || !strings.Contains(hint, "--no-sandbox") {
+		t.Fatalf("hint=%q", hint)
+	}
+	if hint := startupHint(log, info.Size(), true, "chrome"); hint != "" {
+		t.Fatalf("hint with --no-sandbox=%q", hint)
+	}
+}

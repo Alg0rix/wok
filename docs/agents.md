@@ -28,7 +28,10 @@ current Stable headless shell into a shared user cache and uses it automatically
 Use `wok browser install` to preinstall it. `--headed` opens a window with a
 full Chrome/Chromium executable (headless shell itself has no desktop window).
 The sandbox is enabled by default; only use `--no-sandbox` when the execution
-environment needs it and that choice is authorized.
+environment needs it and that choice is authorized. Where the system blocks
+unprivileged user namespaces (Ubuntu's AppArmor policy), the bundled headless
+shell cannot sandbox and `start` says so; prefer an installed Chrome via
+`--browser`/`WOK_BROWSER`, whose own sandbox usually works there.
 
 `start` waits for CDP and, by default, its HTTP viewer. `--no-render` omits the
 viewer; `wok --profile research render` starts it later. Regular action commands

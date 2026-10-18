@@ -146,7 +146,9 @@ browser PID, WebSocket endpoint, and viewer base URL (`renderUrl`). Append
 A viewer has an idle footprint and only captures frames while watched.
 
 Use `--headed` for a window. The sandbox stays enabled unless you explicitly
-pass `--no-sandbox` (needed in some containers). `--timeout 15s` bounds a command,
+pass `--no-sandbox` (needed in some containers). If `start` reports that the
+Chromium sandbox is unavailable (e.g. Ubuntu blocking unprivileged user
+namespaces), use an installed Chrome with `--browser /usr/bin/google-chrome`. `--timeout 15s` bounds a command,
 including lock acquisition; `--timeout 500ms` is useful for selector checks.
 State and logs live under your OS user config directory in `wok/profiles/NAME`.
 Set `WOK_HOME` to override that root. State files are mode 0600 and profile

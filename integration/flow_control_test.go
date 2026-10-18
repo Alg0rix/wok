@@ -161,4 +161,21 @@ steps:
 		t.Fatalf("statuses=%s", statuses)
 	}
 	run("unroute")
+
+	// Thrown errors report the exception, and failed expects the observed values.
+	if _, errOut, e := invoke("eval", "throw new Error('expected 2, got 0')"); e == nil || !strings.Contains(string(errOut), "browser JavaScript: Error: expected 2, got 0") || strings.Contains(string(errOut), "exceptionId") {
+		t.Fatalf("eval error=%v %s", e, errOut)
+	}
+	failFile := filepath.Join(dir, "fail.wok.yaml")
+	os.WriteFile(failFile, []byte(`profile: flowctl
+steps:
+  - eval: 'const n = 2; document.title = `+"`"+`n=$${n}`+"`"+`'
+  - expect: {js: 'document.title === "n=2"'}
+  - expect: {selector: .msg, count: 5}
+    timeout: 300ms
+`), 0600)
+	failOut, _, e := invoke("run", failFile, "--artifacts", dir)
+	if e == nil || !strings.Contains(string(failOut), "count: want 5, got 2") {
+		t.Fatalf("expect failure err=%v %s", e, failOut)
+	}
 }

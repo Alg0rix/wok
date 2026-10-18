@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -170,6 +171,19 @@ func TestRenderKeyboardKeys(t *testing.T) {
 	for _, name := range []string{"F0", "F13", "F1junk"} {
 		if _, err := parseKey(name); err == nil {
 			t.Errorf("accepted invalid function key %q", name)
+		}
+	}
+}
+
+func TestExceptionMessage(t *testing.T) {
+	for raw, want := range map[string]string{
+		`{"exceptionId":1,"text":"Uncaught","exception":{"type":"object","description":"Error: expected 2, got 0\n    at <anonymous>:1:7"}}`: "Error: expected 2, got 0",
+		`{"text":"Uncaught","exception":{"type":"string","value":"plain"}}`:                                                                  "plain",
+		`{"text":"Uncaught SyntaxError: Unexpected token"}`:                                                                                  "Uncaught SyntaxError: Unexpected token",
+		`{}`: `{}`,
+	} {
+		if got := exceptionMessage(json.RawMessage(raw)); got != want {
+			t.Errorf("%s: got %q want %q", raw, got, want)
 		}
 	}
 }

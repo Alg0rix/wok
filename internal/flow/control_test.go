@@ -317,3 +317,52 @@ func TestConditionsInFrames(t *testing.T) {
 		t.Fatalf("frame-only err=%v", err)
 	}
 }
+
+func TestLiteralTemplateEscape(t *testing.T) {
+	s := &stub{run: func(context.Context, []string) (json.RawMessage, error) { return json.RawMessage(`true`), nil }}
+	report, err := Run(context.Background(), []byte(`steps:
+  - eval: 'const n = 2; throwIf(`+"`"+`got $${n}, want ${WANT}`+"`"+`)'
+  - expect: {js: '`+"`"+`$${location.hash}`+"`"+` === ""'}
+`), Options{Vars: map[string]string{"WANT": "3"}}, s.exec)
+	if err != nil || !report.OK {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	if got := s.commands()[1]; got[1] != "const n = 2; throwIf(`got ${n}, want 3`)" {
+		t.Fatalf("eval=%q", got[1])
+	}
+	if !strings.Contains(s.commands()[2][1], "`${location.hash}` === \"\"") {
+		t.Fatalf("expect=%q", s.commands()[2][1])
+	}
+	_, err = Run(context.Background(), []byte("steps: [{eval: '`${n}`'}]"), Options{}, (&stub{}).exec)
+	if err == nil || !strings.Contains(err.Error(), "write $${n} for a literal") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestExpectTimeoutShowsObservedValues(t *testing.T) {
+	for _, tc := range []struct{ expect, observed, want string }{
+		{`{selector: '#total', text: '3 items'}`, `{"count":1,"text":"2 items","visible":true}`, `text: want "3 items", got "2 items"`},
+		{`{selector: '.row', count: 3}`, `{"count":1,"text":"a"}`, `count: want 3, got 1`},
+		{`{selector: '#missing'}`, `{"count":0}`, `selector "#missing" matched no elements`},
+		{`{selector: '#m', contains: 'Saved', visible: true}`, `{"count":1,"text":"Error","visible":false}`, `contains: "Saved" not in "Error"; visible: want true, got false`},
+		{`{url: 'https://x/done'}`, `{"url":"https://x/start"}`, `url: want "https://x/done", got "https://x/start"`},
+		{`{js: 'window.n === 2'}`, `{"js":false}`, `js returned false`},
+		{`{frame: '#f', js: 'a.b'}`, `{"jsError":"TypeError: a is undefined"}`, `js threw TypeError: a is undefined`},
+	} {
+		var observeArgs []string
+		s := &stub{run: func(_ context.Context, args []string) (json.RawMessage, error) {
+			if strings.HasPrefix(args[len(args)-1], "(()=>{const r={};") {
+				observeArgs = args
+				return json.RawMessage(tc.observed), nil
+			}
+			return json.RawMessage(`false`), nil
+		}}
+		_, err := Run(context.Background(), []byte("steps: [{expect: "+tc.expect+", timeout: 50ms}]"), Options{}, s.exec)
+		if err == nil || !strings.Contains(err.Error(), "expect timed out: "+tc.want+" (context deadline exceeded)") {
+			t.Errorf("%s: err=%v", tc.expect, err)
+		}
+		if observeArgs == nil {
+			t.Errorf("%s: page state was not observed", tc.expect)
+		}
+	}
+}

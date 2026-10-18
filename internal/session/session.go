@@ -2,12 +2,14 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -315,11 +317,16 @@ func (s *Store) Start(ctx context.Context, opts StartOptions) (*State, error) {
 		args = append(args, "--proxy-bypass-list="+settings.ProxyBypass)
 	}
 	args = append(args, "about:blank")
-	log, err := os.OpenFile(filepath.Join(s.Dir, "browser.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	logPath := filepath.Join(s.Dir, "browser.log")
+	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return nil, err
 	}
 	defer log.Close()
+	var logStart int64
+	if info, e := log.Stat(); e == nil {
+		logStart = info.Size()
+	}
 	cmd := exec.Command(executable, args...)
 	cmd.Stdout = log
 	cmd.Stderr = log
@@ -354,7 +361,10 @@ func (s *Store) Start(ctx context.Context, opts StartOptions) (*State, error) {
 		}
 		select {
 		case e := <-exited:
-			return nil, fmt.Errorf("browser exited (%v); see %s", e, filepath.Join(s.Dir, "browser.log"))
+			if hint := startupHint(logPath, logStart, opts.NoSandbox, executable); hint != "" {
+				return nil, fmt.Errorf("browser exited (%v): %s; see %s", e, hint, logPath)
+			}
+			return nil, fmt.Errorf("browser exited (%v); see %s", e, logPath)
 		case <-ctx.Done():
 			_ = cmd.Process.Kill()
 			return nil, fmt.Errorf("browser startup: %w; see browser.log", ctx.Err())
@@ -528,4 +538,31 @@ func (s *Store) Stop(ctx context.Context) error {
 	st.RenderURL = ""
 	st.Token = ""
 	return s.Save(st)
+}
+
+// systemBrowsers are checked, in order, when suggesting a browser whose own
+// sandbox works where the bundled headless shell's does not.
+var systemBrowsers = []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge"}
+
+// startupHint explains known browser startup failures logged after offset.
+func startupHint(logPath string, offset int64, noSandbox bool, executable string) string {
+	f, err := os.Open(logPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	if _, err = f.Seek(offset, io.SeekStart); err != nil {
+		return ""
+	}
+	data, _ := io.ReadAll(io.LimitReader(f, 1<<20))
+	if noSandbox || !bytes.Contains(data, []byte("No usable sandbox")) {
+		return ""
+	}
+	hint := "the Chromium sandbox is unavailable (this system blocks unprivileged user namespaces, as Ubuntu's AppArmor policy does)"
+	for _, name := range systemBrowsers {
+		if path, err := exec.LookPath(name); err == nil && path != executable {
+			return fmt.Sprintf("%s; try the installed browser, which ships its own sandbox: --browser %s (or WOK_BROWSER=%s), or pass --no-sandbox", hint, path, path)
+		}
+	}
+	return hint + "; install Google Chrome and pass --browser PATH (or set WOK_BROWSER), or pass --no-sandbox"
 }

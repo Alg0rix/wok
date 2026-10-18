@@ -404,6 +404,9 @@ func TestPlaywrightCLICommandSet(t *testing.T) {
 
 	// delete-data and close-all
 	run("dev", "delete-data")
+	if out := run("", "profile", "list"); strings.Contains(out, `"profile":"dev"`) {
+		t.Fatalf("deleted profile still listed: %s", out)
+	}
 	run("other", "open", "--no-sandbox")
 	if out := run("", "close-all"); !strings.Contains(out, `"profile":"other"`) {
 		t.Fatal(out)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -60,6 +61,10 @@ const frameSeparator = " >> "
 // the iframe part of a "frame >> selector" chain, scopes the eval to that
 // iframe.
 func conditionArgs(m map[string]any) []string {
+	return scopedEval(m, expectExpression)
+}
+
+func scopedEval(m map[string]any, build func(map[string]any) string) []string {
 	frame, _ := m["frame"].(string)
 	if selector, ok := m["selector"].(string); ok {
 		if i := strings.LastIndex(selector, frameSeparator); i >= 0 {
@@ -71,7 +76,7 @@ func conditionArgs(m map[string]any) []string {
 			frame = outer
 		}
 	}
-	args := []string{"eval", expectExpression(m)}
+	args := []string{"eval", build(m)}
 	if frame != "" {
 		args = append([]string{"--frame", frame}, args...)
 	}
@@ -87,16 +92,90 @@ func copyWith(m map[string]any, key string, value any) map[string]any {
 	return out
 }
 
+// observeExpression reports what the page shows for each condition field.
+func observeExpression(m map[string]any) string {
+	var b strings.Builder
+	b.WriteString("(()=>{const r={};")
+	if selector, ok := m["selector"]; ok {
+		b.WriteString("const nodes=document.querySelectorAll(" + jsQuote(selector) + ");const el=nodes[0];r.count=nodes.length;")
+		b.WriteString("if(el){r.text=el.innerText??el.textContent??'';r.value=el.value;const s=getComputedStyle(el),q=el.getBoundingClientRect();r.visible=q.width>0&&q.height>0&&s.visibility!=='hidden'&&s.visibility!=='collapse'&&s.display!=='none'}")
+	}
+	if _, ok := m["url"]; ok {
+		b.WriteString("r.url=location.href;")
+	}
+	if js, ok := m["js"]; ok {
+		b.WriteString("try{r.js=(()=>{return (" + js.(string) + ")})()}catch(e){r.jsError=String(e)}")
+	}
+	b.WriteString("return r})()")
+	return b.String()
+}
+
+// mismatch describes the conditions that the observed page state fails.
+func mismatch(m map[string]any, raw json.RawMessage) string {
+	var got map[string]any
+	if json.Unmarshal(raw, &got) != nil {
+		return ""
+	}
+	show := func(v any) string {
+		b, _ := json.Marshal(v)
+		if s := string(b); len(s) <= 200 {
+			return s
+		}
+		return string(b[:200]) + "..."
+	}
+	out := []string{}
+	if selector, ok := m["selector"]; ok {
+		count, _ := got["count"].(float64)
+		if want, ok := m["count"]; ok {
+			if int(count) != want.(int) {
+				out = append(out, fmt.Sprintf("count: want %d, got %d", want, int(count)))
+			}
+		} else if count == 0 {
+			out = append(out, fmt.Sprintf("selector %s matched no elements", show(selector)))
+		}
+		if count > 0 {
+			if want, ok := m["text"]; ok && got["text"] != want {
+				out = append(out, fmt.Sprintf("text: want %s, got %s", show(want), show(got["text"])))
+			}
+			if want, ok := m["contains"]; ok {
+				if text, _ := got["text"].(string); !strings.Contains(text, want.(string)) {
+					out = append(out, fmt.Sprintf("contains: %s not in %s", show(want), show(got["text"])))
+				}
+			}
+			if want, ok := m["value"]; ok && got["value"] != want {
+				out = append(out, fmt.Sprintf("value: want %s, got %s", show(want), show(got["value"])))
+			}
+		}
+		if want, ok := m["visible"]; ok && (got["visible"] == true) != want {
+			out = append(out, fmt.Sprintf("visible: want %v, got %v", want, got["visible"] == true))
+		}
+	}
+	if want, ok := m["url"]; ok && got["url"] != want {
+		out = append(out, fmt.Sprintf("url: want %s, got %s", show(want), show(got["url"])))
+	}
+	if _, ok := m["js"]; ok {
+		if e, ok := got["jsError"]; ok {
+			out = append(out, fmt.Sprintf("js threw %v", e))
+		} else if got["js"] != true {
+			out = append(out, "js returned "+show(got["js"]))
+		}
+	}
+	return strings.Join(out, "; ")
+}
+
 func assert(ctx context.Context, conditions map[string]any, exec Executor) (json.RawMessage, error) {
 	args := conditionArgs(conditions)
 	ticker := time.NewTicker(75 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, expectFailed(ctx, conditions, exec, err)
 		}
 		result, err := exec(ctx, args)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, expectFailed(ctx, conditions, exec, ctx.Err())
+			}
 			return nil, err
 		}
 		var passed bool
@@ -108,8 +187,25 @@ func assert(ctx context.Context, conditions map[string]any, exec Executor) (json
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, expectFailed(ctx, conditions, exec, ctx.Err())
 		case <-ticker.C:
 		}
 	}
+}
+
+// expectFailed explains a timed-out expect with the last observed values.
+func expectFailed(ctx context.Context, conditions map[string]any, exec Executor, cause error) error {
+	if !errors.Is(cause, context.DeadlineExceeded) {
+		return cause
+	}
+	observeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	raw, err := exec(observeCtx, scopedEval(conditions, observeExpression))
+	if err != nil {
+		return fmt.Errorf("expect timed out (%w); could not read page state: %v", cause, err)
+	}
+	if detail := mismatch(conditions, raw); detail != "" {
+		return fmt.Errorf("expect timed out: %s (%w)", detail, cause)
+	}
+	return fmt.Errorf("expect timed out (%w)", cause)
 }

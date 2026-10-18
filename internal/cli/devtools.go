@@ -691,7 +691,7 @@ func deleteData(ctx context.Context, store *session.Store, out io.Writer) error 
 			}
 		}
 	}
-	for _, name := range []string{"browser", "state.json", "routes.json", "dialog-policy.json", "show-actions", "render-ready.json"} {
+	for _, name := range []string{"browser", "state.json", "routes.json", "dialog-policy.json", "show-actions", "render-ready.json", "browser.log"} {
 		target := filepath.Join(store.Dir, name)
 		var err error
 		for deadline := time.Now().Add(3 * time.Second); ; {
