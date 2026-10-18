@@ -48,7 +48,11 @@ func TestListAndShow(t *testing.T) {
 	}
 }
 func TestDefaultInstallIdempotent(t *testing.T) {
-	dir := t.TempDir()
+	// The working directory is reported canonically (macOS /var is a symlink).
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	chdir(t, dir)
 	results := run(t, "install")
 	target := filepath.Join(dir, ".agents", "skills", "wok")
