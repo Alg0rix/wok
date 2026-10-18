@@ -849,7 +849,7 @@ var helpSummaries = map[string]string{
 	"dialogs":               "wok dialogs — Read recorded JavaScript dialogs",
 	"run-code":              "wok run-code [CODE] — Run newline-separated Wok command lines",
 	"exec":                  "wok exec FILE|- — Run newline-separated Wok command lines from a file or stdin",
-	"run":                   "wok run FILE|- [--var K=V] — Run a YAML/JSON action flow",
+	"run":                   "wok run FILE|- [--var K=V] [--no-redact] — Run a YAML/JSON action flow",
 	"recording-start":       "wok recording-start — Start recording user interactions in the page",
 	"recording-stop":        "wok recording-stop — Stop recording and emit captured actions and script",
 	"tracing-start":         "wok tracing-start [CATEGORIES] — Start Chromium trace recording",

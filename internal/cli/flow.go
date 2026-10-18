@@ -30,7 +30,7 @@ func (v variables) Set(raw string) error {
 }
 func runFlow(ctx context.Context, args []string, o Options, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: wok run FILE|- [--var KEY=VALUE] [--artifacts DIR]")
+		return errors.New("usage: wok run FILE|- [--var KEY=VALUE] [--artifacts DIR] [--no-redact]")
 	}
 	file := args[0]
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
@@ -38,6 +38,7 @@ func runFlow(ctx context.Context, args []string, o Options, out io.Writer) error
 	vars := variables{}
 	flags.Var(vars, "var", "flow variable KEY=VALUE (repeatable)")
 	artifacts := flags.String("artifacts", "", "failure screenshot directory")
+	noRedact := flags.Bool("no-redact", false, "keep variable and captured values in errors")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -61,7 +62,7 @@ func runFlow(ctx context.Context, args []string, o Options, out io.Writer) error
 	if o.ProfileSet {
 		profile = o.Profile
 	}
-	options := flow.Options{Profile: profile, Endpoint: o.Endpoint, TargetID: o.Tab, Vars: vars, ArtifactDir: *artifacts}
+	options := flow.Options{Profile: profile, Endpoint: o.Endpoint, TargetID: o.Tab, Vars: vars, ArtifactDir: *artifacts, NoRedact: *noRedact}
 	execute := func(stepCtx context.Context, command []string) (json.RawMessage, error) {
 		// Reuse CLI behavior in process. The command still takes its profile lock,
 		// attaches via CDP and detaches, but does not start another Wok process.

@@ -30,8 +30,9 @@ func under(key, name string) bool {
 }
 
 type variables struct {
-	values  map[string]string
-	secrets map[string]bool
+	values   map[string]string
+	secrets  map[string]bool
+	noRedact bool
 }
 
 func newVariables(initial map[string]string) *variables {
@@ -302,8 +303,8 @@ type redactedError struct {
 func (e redactedError) Error() string { return e.message }
 func (e redactedError) Unwrap() error { return e.original }
 func (v *variables) redact(err error) error {
-	if err == nil {
-		return nil
+	if err == nil || v.noRedact {
+		return err
 	}
 	secrets := make([]string, 0, len(v.secrets))
 	for secret := range v.secrets {

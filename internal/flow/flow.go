@@ -20,6 +20,8 @@ type Options struct {
 	TargetID    string
 	Vars        map[string]string
 	ArtifactDir string
+	// NoRedact keeps variable and captured values in errors.
+	NoRedact bool
 }
 type StepReport struct {
 	Index      int             `json:"index"`
@@ -47,6 +49,7 @@ func Run(ctx context.Context, source []byte, opts Options, exec Executor) (repor
 		report.Profile = "default"
 	}
 	vars := newVariables(opts.Vars)
+	vars.noRedact = opts.NoRedact
 	failValidation := func(err error) (Report, error) {
 		err = vars.redact(err)
 		report.Error = err.Error()
@@ -56,6 +59,7 @@ func Run(ctx context.Context, source []byte, opts Options, exec Executor) (repor
 	if err != nil {
 		return failValidation(err)
 	}
+	vars.noRedact = vars.noRedact || doc.noRedact
 	profile := opts.Profile
 	if profile == "" {
 		profile = doc.profile

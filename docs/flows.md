@@ -19,6 +19,7 @@ cat examples/batch.wok.json | wok run - --var PAGE_URL=https://example.com
 version: 1
 profile: e2e
 close: false
+redact: true          # false shows variable values in errors
 viewport:
   width: 390
   height: 844
@@ -203,6 +204,11 @@ variables fail rather than becoming empty strings. Write `$${...}` for a literal
 expansions. Prefer environment variables for secrets so values do not appear in
 the process command line; reports do not list command arguments. Page results,
 errors, and screenshots may still include page data, so keep artifacts private.
+
+Error messages replace the values of `--var` and environment variables, and
+text values captured with `save`, with `[redacted]`. When those values are test
+data you need to see in failures, such as captured request bodies, turn this off
+with `redact: false` at the top of the flow or `wok run --no-redact`.
 
 Use `save` to reuse a result later:
 

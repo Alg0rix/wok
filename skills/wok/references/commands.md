@@ -140,7 +140,7 @@ wok close-all
 | `wok dialogs` | Read recorded JavaScript dialogs (`type`, `message`, `accepted`, `promptText`). |
 | `wok run-code [code]` | Execute newline-separated Wok command lines from the argument or stdin. |
 | `wok exec <file\|->` | Execute newline-separated Wok command lines from a file or stdin. |
-| `wok run <file\|-> [--var K=V] [--artifacts DIR]` | Run a YAML/JSON action flow with optional E2E assertions, `if`/`repeat`/`each` control flow, and `route`/`unroute`/`request` network steps (see docs/flows.md). |
+| `wok run <file\|-> [--var K=V] [--artifacts DIR] [--no-redact]` | Run a YAML/JSON action flow with optional E2E assertions, `if`/`repeat`/`each` control flow, and `route`/`unroute`/`request` network steps (see docs/flows.md). |
 | `wok recording-start` | Record user clicks, fills, selects, checks, and keys in the page. |
 | `wok recording-stop` | Stop recording and return both structured `actions` and a replayable `wok exec` `script`. |
 | `wok tracing-start [categories]` | Start Chromium trace capture. |

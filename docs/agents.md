@@ -107,7 +107,8 @@ E2E assertions. Flows support `if`/`then`/`else`, `repeat` (`times`, `while`,
 so branching logic need not move into `eval`. Filter requests with
 `network: {method, url, body: true}`, wait for them with
 `expect: {network: {url, count}}`, and pass saved values into JavaScript as JSON
-literals with `${name|json}`. `wok run FILE` emits a report;
+literals with `${name|json}`. Errors redact variable and saved text values;
+use `redact: false` or `--no-redact` to see them. `wok run FILE` emits a report;
 failure screenshots use an artifact directory. Store stable selectors in flows,
 rather than refs from previous runs.
 

@@ -443,3 +443,26 @@ func TestNetworkFiltersConditionsAndJSON(t *testing.T) {
 		t.Fatalf("external network condition err=%v", err)
 	}
 }
+
+func TestRedactionOptOut(t *testing.T) {
+	failing := func(context.Context, []string) (json.RawMessage, error) {
+		return nil, errors.New("got secret-token")
+	}
+	flow := []byte("steps: [{eval: '${TOKEN}'}]")
+	vars := map[string]string{"TOKEN": "secret-token"}
+	_, err := Run(context.Background(), flow, Options{Vars: vars}, (&stub{run: failing}).exec)
+	if err == nil || strings.Contains(err.Error(), "secret-token") || !strings.Contains(err.Error(), "[redacted]") {
+		t.Fatalf("default err=%v", err)
+	}
+	_, err = Run(context.Background(), flow, Options{Vars: vars, NoRedact: true}, (&stub{run: failing}).exec)
+	if err == nil || !strings.Contains(err.Error(), "got secret-token") {
+		t.Fatalf("--no-redact err=%v", err)
+	}
+	_, err = Run(context.Background(), append([]byte("redact: false\n"), flow...), Options{Vars: vars}, (&stub{run: failing}).exec)
+	if err == nil || !strings.Contains(err.Error(), "got secret-token") {
+		t.Fatalf("redact: false err=%v", err)
+	}
+	if _, err = Run(context.Background(), []byte("redact: nope\nsteps: [{eval: x}]"), Options{}, (&stub{}).exec); err == nil || !strings.Contains(err.Error(), "redact") {
+		t.Fatalf("invalid redact err=%v", err)
+	}
+}

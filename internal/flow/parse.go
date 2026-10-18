@@ -16,6 +16,7 @@ import (
 type document struct {
 	profile  string
 	close    bool
+	noRedact bool
 	viewport map[string]any
 	steps    []step
 }
@@ -127,7 +128,7 @@ func parse(source []byte) (document, error) {
 	if len(node.Content) != 1 {
 		return doc, errors.New("flow must be an object")
 	}
-	root, err := fields(node.Content[0], "version", "profile", "close", "viewport", "steps")
+	root, err := fields(node.Content[0], "version", "profile", "close", "redact", "viewport", "steps")
 	if err != nil {
 		return doc, err
 	}
@@ -148,6 +149,13 @@ func parse(source []byte) (document, error) {
 		if err != nil {
 			return doc, fmt.Errorf("close: %w", err)
 		}
+	}
+	if n := root["redact"]; n != nil {
+		redact, err := boolean(n)
+		if err != nil {
+			return doc, fmt.Errorf("redact: %w", err)
+		}
+		doc.noRedact = !redact
 	}
 	if n := root["viewport"]; n != nil {
 		f, err := fields(n, "width", "height", "mobile", "dpr")
