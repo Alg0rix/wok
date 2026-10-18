@@ -682,7 +682,15 @@ func deleteData(ctx context.Context, store *session.Store, out io.Writer) error 
 		}
 	}
 	for _, name := range []string{"browser", "state.json", "routes.json", "dialog-policy.json", "show-actions", "render-ready.json"} {
-		if err := os.RemoveAll(filepath.Join(store.Dir, name)); err != nil {
+		target := filepath.Join(store.Dir, name)
+		var err error
+		for deadline := time.Now().Add(3 * time.Second); ; {
+			if err = os.RemoveAll(target); err == nil || !time.Now().Before(deadline) {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if err != nil {
 			return err
 		}
 	}

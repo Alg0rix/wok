@@ -205,9 +205,7 @@ func TestPlaywrightCLICommandSet(t *testing.T) {
 		t.Fatal(out)
 	}
 	run("dev", "mousewheel", "0", "120")
-	if out := run("dev", "eval", "window.wheelDelta"); out != "120" {
-		t.Fatal(out)
-	}
+	run("dev", "wait", "--fn", "window.wheelDelta === 120")
 
 	// Screenshot target and PDF
 	var shot map[string]any

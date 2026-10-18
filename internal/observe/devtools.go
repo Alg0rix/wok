@@ -821,10 +821,7 @@ func (m *Manager) serveDebugger(w http.ResponseWriter, r *http.Request) {
 			err = errors.New("debugger is not active; use pause-at first")
 			break
 		}
-		method := map[string]string{"resume": "Debugger.resume", "step-over": "Debugger.stepOver"}[input.Action]
-		err = m.call(t.session, method, nil, nil)
-		if err == nil && input.Action == "step-over" {
-			// Report the next pause location when the step completes promptly.
+		waitPaused := func() {
 			deadline := time.Now().Add(2 * time.Second)
 			for time.Now().Before(deadline) {
 				m.mu.Lock()
@@ -835,6 +832,12 @@ func (m *Manager) serveDebugger(w http.ResponseWriter, r *http.Request) {
 				}
 				time.Sleep(25 * time.Millisecond)
 			}
+		}
+		waitPaused()
+		method := map[string]string{"resume": "Debugger.resume", "step-over": "Debugger.stepOver"}[input.Action]
+		err = m.call(t.session, method, nil, nil)
+		if err == nil && input.Action == "step-over" {
+			waitPaused()
 		}
 	case "clear":
 		if enabled {
