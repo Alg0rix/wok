@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -468,6 +469,9 @@ func TestRedactionOptOut(t *testing.T) {
 }
 
 func TestElementActionsAndFlowDirFiles(t *testing.T) {
+	base := t.TempDir()
+	abs := filepath.Join(t.TempDir(), "b.png")
+	in := func(path string) string { return filepath.Join(base, filepath.FromSlash(path)) }
 	s := &stub{run: func(context.Context, []string) (json.RawMessage, error) { return json.RawMessage(`true`), nil }}
 	report, err := Run(context.Background(), []byte(`steps:
   - dblclick: "#row"
@@ -477,7 +481,7 @@ func TestElementActionsAndFlowDirFiles(t *testing.T) {
   - select: {selector: "#size", value: m}
   - select: {selector: "#tags", values: [a, b]}
   - drag: {from: "#card", to: "#done"}
-  - drop: {selector: "#zone", files: [a.png, /abs/b.png]}
+  - drop: {selector: "#zone", files: [a.png, '${ABS}']}
   - drop: {selector: "#zone", text: hello}
   - keydown: Shift
   - keyup: Shift
@@ -489,17 +493,17 @@ func TestElementActionsAndFlowDirFiles(t *testing.T) {
   - state-load: state.json
   - upload: {selector: "#pick", files: [fixtures/cv.pdf]}
   - route: {pattern: "**/api/**", bodyFile: mocks/api.json}
-`), Options{Dir: "/flows"}, s.exec)
+`), Options{Dir: base, Vars: map[string]string{"ABS": abs}}, s.exec)
 	if err != nil || !report.OK {
 		t.Fatalf("report=%+v err=%v", report, err)
 	}
 	want := [][]string{
 		{"dblclick", "#row"}, {"hover", "#menu"}, {"check", "#agree"}, {"uncheck", "#news"},
 		{"select", "#size", "m"}, {"select", "#tags", "a", "b"}, {"drag", "#card", "#done"},
-		{"drop", "#zone", "/flows/a.png", "/abs/b.png"}, {"drop", "#zone", "--text", "hello"},
+		{"drop", "#zone", in("a.png"), abs}, {"drop", "#zone", "--text", "hello"},
 		{"keydown", "Shift"}, {"keyup", "Shift"}, {"go-back"}, {"go-forward"}, {"reload"},
-		{"pdf", "out.pdf"}, {"state-save", "state.json"}, {"state-load", "/flows/state.json"},
-		{"upload", "#pick", "/flows/fixtures/cv.pdf"}, {"route", "**/api/**", "--body-file", "/flows/mocks/api.json"},
+		{"pdf", "out.pdf"}, {"state-save", "state.json"}, {"state-load", in("state.json")},
+		{"upload", "#pick", in("fixtures/cv.pdf")}, {"route", "**/api/**", "--body-file", in("mocks/api.json")},
 	}
 	commands := s.commands()[1:] // after start
 	if len(commands) != len(want) {
